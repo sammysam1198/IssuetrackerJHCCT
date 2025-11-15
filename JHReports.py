@@ -1,6 +1,7 @@
 import json
-
 import os
+import requests
+stores_cache = None
 
 class c:
     RESET = "\033[0m"
@@ -30,22 +31,42 @@ class c:
     def green(text):
         return c.rgb(0, 255, 0, text)
 
-#Color Variables
+#Color Variables here
 BLUE_BG = "\033[48;2;47;74;119m" #JH Blue
 YELLOW = "\033[38;2;255;237;13m" #JH Yellow
 RESET = "\033[0m"
-WHITE = "\033[1;37m"        # Bright white
-RED = "\033[1;31m"          # Bold red for errors
-GREEN = "\033[1;32m"        # Success message
 
 
-def fill_blue():
-    for _ in range(40):   # 40 rows tall
-        print(BLUE_BG + " " * 200 + RESET)  # 200 columns wide
+
+API_BASE = "https://api-server-jh.onrender.com"  # your Render URL
+
+def load_from_api():
+    print(c.yellow("Connecting to server..."))  # optional: shows you're trying
+
+    try:
+        response = requests.get(f"{API_BASE}/stores", timeout=60)
+        response.raise_for_status()
+        stores = response.json()
+
+        print("\n" + c.green("Successfully loaded stores from API"))
+
+        return stores
+
+    except requests.RequestException as e:
+        print("\n" + c.red(f"Error loading store list from server: {e}"))
+        return None
+
+def get_stores():
+    global stores_cache
+    if stores_cache is None:
+        stores_cache = load_from_api()  # loads ONCE, prints success ONCE
+    return stores_cache
 
 def issueAdd():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     #COLLECT STORE NUMBERS FROM STORES.JSON
     valid_store_numbers = {details["Store Number"] for details in stores.values()}
@@ -104,18 +125,26 @@ def issueAdd():
         "Resolution": ""
     }
 
-    #ADD ISSUE TO FILe
-    stores[sName] ["Known Issues"].append(newIssue)
+    # 6. SEND ISSUE TO THE API INSTEAD OF WRITING LOCAL JSON
+    payload = {
+        "store_name": sName,
+        "issue": newIssue
+    }
 
-    #SAVE THE DATA YOU JUST ADDED TO THE JSON FILE:
-    with open("Stores.json", "w") as file:
-        json.dump(stores, file, indent=4)
+    try:
+        response = requests.post(f"{API_BASE}/issues", json=payload, timeout=60)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print("\n" + c.red(f"Error sending issue to server: {e}"))
+        return
 
-    print("\n" + c.green(f"Issue '{iName}' added to {sName}"))
+    print("\n" + c.green(f"Issue '{iName}' added to {sName} and synced to the server."))
 
-def issueStoreSearch(stores):
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+def issueStoreSearch():
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     while True:
         query = input("\nEnter store number or part of store name (or type 'exit' to cancel): ").strip()
@@ -199,9 +228,11 @@ def issueResAdd(issue):
     print(c.green("Resolution added successfully"))
 
 def issueUpdate():
-    # Load the JSON file
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    #load from API
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     # Prompt for store number
     sNum = input("Enter the store number: ").strip()
@@ -249,15 +280,26 @@ def issueUpdate():
         if addRes == "y":
             issueResAdd(knownIssues[issueNumber])
 
-    # Save the updated data back to the JSON file
-    with open("Stores.json", "w") as file:
-        json.dump(stores, file, indent=4)
+    payload = {
+        "store_name": sName,
+        "issue_index": issueNumber,
+        "updated_issue": knownIssues[issueNumber]
+    }
 
-    print(c.green(f"\nStatus updated for issue #{issueNumber + 1} in {sName}."))
+    try:
+        response = requests.post(f"{API_BASE}/issues/update", json=payload, timeout=60)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(c.red(f"\nError updating issue on server: {e}"))
+        return
+
+    print(c.green(f"\nStatus updated for issue #{issueNumber + 1} in {sName} (synced to cloud)."))
 
 def issueViewAll():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     print("\n" + c.blue_bg(c.yellow("*****Stores with Known issues*****\n")))
     has_issues = False
@@ -330,8 +372,10 @@ def issueSelectStore(matches):
 
 def issueViewOne():
     """View issues for a single store by name or number."""
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     while True:
         print("\n" + c.blue_bg(c.yellow("***** View Issues For One Store *****")))
@@ -433,8 +477,10 @@ def issueViewOne():
             break
 
 def issueEdit():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     # 1. PICK STORE
     sName = issueStoreSearch(stores)
@@ -557,8 +603,10 @@ def issueEdit():
     print("\n" + c.green("Changes saved."))
 
 def issuePrintAll():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     print("\nCreating dump file")
 
