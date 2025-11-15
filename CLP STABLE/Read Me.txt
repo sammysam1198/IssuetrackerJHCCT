@@ -1,0 +1,13 @@
+************THIS IS A BETA THERE WILL BE BUGS************
+
+Make sure you are typing numbers where numbers are expected (ie in store number or when selecting an issue). The program will otherwise throw an error and you'll have to try again. 
+
+Editing issue characteristics and moving/copying them to other stores is something that is in the works and currently being developed. However in the early access stages please check and double check store numbers because issues cannot be deleted due to backlogging concerns. The point of this software is to log all issue throughout the year and then consolidate the data at the end of the season. If the software allowed you to delete issues it would be unclear whether all were logged or not. 
+
+You MUST MUST MUST not remove the json or the program from the folder they have to be in the same location to work properly. 
+
+This is a standalone .exe that relies solely on the JSON file. So to start the program simply double click the "Pro" application and get going on your report. 
+
+Any questions can be sent to Sammi.Fishbein@JTax.com or referred to the CLP DM John Maron. 
+
+I hope that this program can potentially help us track issues locally, so that we can issue solutions nationally and evolve drastically
