@@ -270,9 +270,9 @@ def update_issue():
     return jsonify({"message": "Issue updated", "issue": updated_row}), 200
 
 
-if __name__ == "__main__":
-    # Initialize DB schema on startup
-    init_db()
+# Initialize DB schema when the app starts (works with gunicorn)
+init_db()
 
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
