@@ -1,6 +1,8 @@
 import json
-
 import os
+import requests
+
+stores_cache = None
 
 class c:
     RESET = "\033[0m"
@@ -13,7 +15,7 @@ class c:
     def bg(r, g, b, text):
         return f"\033[48;2;{r};{g};{b}m{text}{c.RESET}"
 
-    # Your theme colors:
+    # Theme colors:
     @staticmethod
     def yellow(text):
         return c.rgb(255, 237, 13, text)
@@ -30,92 +32,146 @@ class c:
     def green(text):
         return c.rgb(0, 255, 0, text)
 
-#Color Variables
-BLUE_BG = "\033[48;2;47;74;119m" #JH Blue
-YELLOW = "\033[38;2;255;237;13m" #JH Yellow
+
+# Color escape codes for the main menu banner
+BLUE_BG = "\033[48;2;47;74;119m"  # JH Blue
+YELLOW = "\033[38;2;255;237;13m"  # JH Yellow
 RESET = "\033[0m"
-WHITE = "\033[1;37m"        # Bright white
-RED = "\033[1;31m"          # Bold red for errors
-GREEN = "\033[1;32m"        # Success message
+
+API_BASE = "https://api-server-jh.onrender.com"  # Render URL
 
 
-def fill_blue():
-    for _ in range(40):   # 40 rows tall
-        print(BLUE_BG + " " * 200 + RESET)  # 200 columns wide
+# -----------------------------------
+# API + STORE HELPERS
+# -----------------------------------
 
-def issueAdd():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+def displayIssues(store_name: str, store_number, issues: list):
+    """Pretty-print issues for a store using DB column names."""
+    print(f"\n{store_name} {store_number}")
+    print("Known Issues:")
 
-    #COLLECT STORE NUMBERS FROM STORES.JSON
-    valid_store_numbers = {details["Store Number"] for details in stores.values()}
-
-    #VARIABLE DECLARATION AND COLLECTION OF DATA
-    while True:
-        sNum = input("\n" + c.blue_bg(c.yellow("Store number: ")))
-
-        # VALIDATION
-        try:
-            sNum_int = int(sNum)
-        except ValueError:
-            print("\n" + c.red("Invalid input! Store number must be a number."))
-            continue
-
-        if sNum_int not in valid_store_numbers:
-            print("\n" + c.red("Store number not found! Please enter a valid number."))
-            continue
-
-        #if we reach here then the store number is valid
-        break
-
-    devName = input("\n" + c.blue_bg(c.yellow("What type of device is experiencing the issue? (e.g., Phone, Computer etc.): "))).strip()
-
-    compNum = "N/A"
-    if "computer" in devName.lower():
-        compNum = input("\n" + c.blue_bg(c.yellow("Computer experiencing the issue: ")))
-
-    cat = input("\n" + c.blue_bg(c.yellow("Issue Category: ")))
-    priority = input("\n1. Critical\n2. Functional\n3. Cosmetic:\n\nPriority: ")
-    desc = input("\n" + c.blue_bg(c.yellow("Describe the issue: ")))
-    repro = input("\n" + c.blue_bg(c.yellow("Has this issue been reproduced on any other systems (Yes/No)?: ")))
-    iName = input("\n" + c.blue_bg(c.yellow("Give this issue a name: ")))
-
-    sName = None
-    for store, details in stores.items():
-        if str(details["Store Number"]) == sNum:
-            sName = store
-            break
-
-    if not sName:
-        print("\n" + c.red("Store number not found! Please try again"))
+    if not issues:
+        print(c.yellow("No issues for this store!"))
         return
 
-    #define new issue
-    newIssue = {
-        "Issue Name": iName,
-        "Priority": priority,
-        "Store Number": sNum,
-        "Computer Number": compNum,
-        "Type": cat,
-        "Description": desc,
-        "Narrative": "",
-        "Replicable?": repro,
-        "Status": "Unresolved",
-        "Resolution": ""
+    for idx, issue in enumerate(issues, start=1):
+        issue_name = issue.get("issue_name") or "Unnamed Issue"
+        status = issue.get("status") or "Unresolved"
+        desc = issue.get("description") or "No description provided"
+        res = issue.get("resolution") or "None Provided"
+
+        print(f"\n{idx}. {issue_name} [{status}]")
+        if status.lower() == "resolved":
+            print(f"Resolution: {res}")
+        else:
+            print(f"Description: {desc}")
+
+    print(f"\nnumber of issues: {len(issues)}")
+
+def apiLoad():
+    """Load store metadata from the API (from Stores.json on the server)."""
+    print(c.yellow("Connecting to server..."))
+
+    try:
+        response = requests.get(f"{API_BASE}/stores", timeout=60)
+        response.raise_for_status()
+        stores = response.json()
+        print("\n" + c.green("Successfully loaded stores from API"))
+        return stores
+    except requests.RequestException as e:
+        print("\n" + c.red(f"Error loading store list from server: {e}"))
+        return None
+
+def getIssuesForStore(store_number=None, store_name=None):
+    """
+    Call GET /issues/by-store with either ?store_number= or ?store_name=.
+    Returns a list of issue rows (dicts) from the DB, or [] on error.
+    """
+    params = {}
+    if store_number is not None:
+        params["store_number"] = str(store_number)
+    elif store_name is not None:
+        params["store_name"] = store_name
+    else:
+        print(c.red("Must provide store_number or store_name to get issues."))
+        return []
+
+    try:
+        resp = requests.get(f"{API_BASE}/issues/by-store", params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        print(c.red(f"Error fetching issues from server: {e}"))
+        return []
+
+def get_stores():
+    """Cached loader for store metadata."""
+    global stores_cache
+    if stores_cache is None:
+        stores_cache = apiLoad()
+    return stores_cache
+
+def build_legacy_issue_from_db(store_name: str, row: dict) -> dict:
+    """
+    Convert a DB row (issue_name, status, ...) into the legacy "Issue Name" style
+    that /issues/update expects in `updated_issue`.
+    """
+    return {
+        "Store Name": store_name,
+        "Store Number": row.get("store_number"),
+        "Issue Name": row.get("issue_name"),
+        "Priority": row.get("priority"),
+        "Computer Number": row.get("computer_number"),
+        "Type": row.get("device_type"),
+        "Description": row.get("description"),
+        "Narrative": row.get("narrative") or "",
+        "Replicable?": row.get("replicable"),
+        "Status": row.get("status"),
+        "Resolution": row.get("resolution") or "",
     }
 
-    #ADD ISSUE TO FILe
-    stores[sName] ["Known Issues"].append(newIssue)
+def apiUpdate(issue_id: int, updated_issue: dict) -> bool:
+    """
+    Send the edited issue back to the API via POST /issues/update.
+    Expects:
+      issue_id: DB primary key (issues.id)
+      updated_issue: legacy-style dict (Issue Name, Status, etc.)
+    """
+    payload = {
+        "issue_id": issue_id,
+        "updated_issue": updated_issue,
+    }
 
-    #SAVE THE DATA YOU JUST ADDED TO THE JSON FILE:
-    with open("Stores.json", "w") as file:
-        json.dump(stores, file, indent=4)
+    try:
+        resp = requests.post(f"{API_BASE}/issues/update", json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        print(c.red(f"Error updating issue on server: {e}"))
+        return False
 
-    print("\n" + c.green(f"Issue '{iName}' added to {sName}"))
+def apiDelete(issue_id: int) -> bool:
+    """
+    Delete an issue on the server via POST /issues/delete.
+    """
+    payload = {"issue_id": issue_id}
+    try:
+        resp = requests.post(f"{API_BASE}/issues/delete", json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        print(c.red(f"Error deleting issue on server: {e}"))
+        return False
 
-def issueStoreSearch(stores):
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+# -----------------------------------
+# STORE SEARCH / SELECTION
+# -----------------------------------
+
+def issueStoreSearch():
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return None
 
     while True:
         query = input("\nEnter store number or part of store name (or type 'exit' to cancel): ").strip()
@@ -193,95 +249,6 @@ def issueStoreSearch(stores):
             # Exactly one after filtering
             return filtered[0][0]
 
-def issueResAdd(issue):
-    res = input("Resolution: ").strip()
-    issue["Resolution"] = res
-    print(c.green("Resolution added successfully"))
-
-def issueUpdate():
-    # Load the JSON file
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
-
-    # Prompt for store number
-    sNum = input("Enter the store number: ").strip()
-    sName = None
-
-    # Find the store by its store number
-    for store, details in stores.items():
-        if str(details["Store Number"]) == sNum:
-            sName = store
-            break
-
-    if not sName:
-        print(c.red("Store number not found. Please try again."))
-        return
-
-    # Retrieve known issues for the selected store
-    knownIssues = stores[sName].get("Known Issues", [])
-    if not knownIssues:
-        print(c.yellow(f"No known issues for {sName}."))
-        return
-
-    # Display the known issues
-    print(f"\nKnown Issues for {sName} (Store Number: {sNum}):")
-    for idx, issue in enumerate(knownIssues, start=1):
-        print(f"{idx}. Computer: {issue.get('Computer Number', 'N/A')}, "
-              f"Type: {issue.get('Type', 'N/A')}, "
-              f"Status: {issue.get('Status', 'Unresolved')}")
-
-    # Prompt user for the issue number
-    try:
-        issueNumber = int(input("\nEnter the issue number to update: ").strip()) - 1
-        if issueNumber < 0 or issueNumber >= len(knownIssues):
-            print(c.red("\nInvalid issue number. Please try again."))
-            return
-    except ValueError:
-        print(c.red("\nInvalid input. Please enter a number."))
-        return
-
-    # Prompt for the updated status
-    statusNew = input("\nEnter the updated status (Unresolved, In Progress, Resolved): ").strip()
-    knownIssues[issueNumber]["Status"] = statusNew  # Update the status
-
-    if statusNew.lower() == "resolved":
-        addRes = input("\nWould you like to add a resolution for this issue (Y/N)?: ").strip().lower()
-        if addRes == "y":
-            issueResAdd(knownIssues[issueNumber])
-
-    # Save the updated data back to the JSON file
-    with open("Stores.json", "w") as file:
-        json.dump(stores, file, indent=4)
-
-    print(c.green(f"\nStatus updated for issue #{issueNumber + 1} in {sName}."))
-
-def issueViewAll():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
-
-    print("\n" + c.blue_bg(c.yellow("*****Stores with Known issues*****\n")))
-    has_issues = False
-
-    #look thru the stores entries
-    for sName, details in stores.items():
-        if len(details.get("Known Issues", [])) > 0:
-            has_issues = True
-            print(f"Store: {sName}")
-            print(f"Store Number: {details['Store Number']}")
-            print("Known Issues")
-            for idx, issue in enumerate(details["Known Issues"], start=1):
-                status = issue.get("Status", "Unresolved")
-                if status.lower() == "resolved":
-                    res = issue.get("Resolution", "None Provided")
-                    print(f"\n{idx}. [Resolved] {issue['Type']}\nResolution: {res}")
-                else:
-                    print(f"\n{idx}. [{status}] {issue['Type']}\nDescription: {issue['Description']}")
-
-            print("-" * 40)
-
-    if not has_issues:
-        print(c.yellow("\nNo stores have reported issues at this time"))
-
 def issueSelectStore(matches):
     """
     Given a list of (store_name, details) matches,
@@ -328,10 +295,131 @@ def issueSelectStore(matches):
                 return matches[selection_int - 1]
         print(c.red("Invalid selection. Please try again."))
 
+def select_issue_for_store(store_name: str, store_number: int):
+    """
+    Fetch issues from the DB for a store, let the user pick one.
+    Returns the chosen DB row (with 'id', 'issue_name', etc.) or None.
+    """
+    if store_number is not None:
+        issues = getIssuesForStore(store_number=store_number)
+    else:
+        issues = getIssuesForStore(store_name=store_name)
+
+    if not issues:
+        print(c.yellow(f"\nNo issues found for {store_name}."))
+        return None
+
+    print(f"\nIssues for {store_name} (Store {store_number}):")
+    for idx, issue in enumerate(issues, start=1):
+        issue_name = issue.get("issue_name") or "Unnamed Issue"
+        status = issue.get("status") or "Unresolved"
+        comp = issue.get("computer_number") or "N/A"
+        dev = issue.get("device_type") or "N/A"
+        print(f"{idx}. {issue_name} [{status}] (Device: {dev}, Computer: {comp})")
+
+    while True:
+        choice = input("\nSelect an issue number: ").strip()
+        if choice.isdigit():
+            issue_index = int(choice)
+            if 1 <= issue_index <= len(issues):
+                return issues[issue_index - 1]
+        print(c.red("Invalid selection. Please enter a valid issue number."))
+
+# -----------------------------------
+# ISSUE CREATION
+# -----------------------------------
+
+def issueAdd():
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
+
+    # Collect valid store numbers from store metadata
+    valid_store_numbers = {details["Store Number"] for details in stores.values()}
+
+    # Store number input + validation
+    while True:
+        sNum = input("\n" + c.blue_bg(c.yellow("Store number: ")))
+
+        try:
+            sNum_int = int(sNum)
+        except ValueError:
+            print("\n" + c.red("Invalid input! Store number must be a number."))
+            continue
+
+        if sNum_int not in valid_store_numbers:
+            print("\n" + c.red("Store number not found! Please enter a valid number."))
+            continue
+
+        break
+
+    devName = input(
+        "\n"
+        + c.blue_bg(
+            c.yellow("What type of device is experiencing the issue? (e.g., Phone, Computer etc.): ")
+        )
+    ).strip()
+
+    compNum = "N/A"
+    if "computer" in devName.lower():
+        compNum = input("\n" + c.blue_bg(c.yellow("Computer experiencing the issue: ")))
+
+    cat = input("\n" + c.blue_bg(c.yellow("Issue Category: ")))
+    priority = input("\n1. Critical\n2. Functional\n3. Cosmetic:\n\nPriority: ")
+    desc = input("\n" + c.blue_bg(c.yellow("Describe the issue: ")))
+    repro = input("\n" + c.blue_bg(c.yellow("Has this issue been reproduced on any other systems (Yes/No)?: ")))
+    iName = input("\n" + c.blue_bg(c.yellow("Give this issue a name: ")))
+
+    # Resolve sName from store number
+    sName = None
+    for store, details in stores.items():
+        if str(details["Store Number"]) == sNum:
+            sName = store
+            break
+
+    if not sName:
+        print("\n" + c.red("Store number not found! Please try again"))
+        return
+
+    # Define new issue in legacy format (matches backend add_issue expectation)
+    newIssue = {
+        "Issue Name": iName,
+        "Priority": priority,
+        "Store Number": sNum,
+        "Computer Number": compNum,
+        "Type": cat,
+        "Description": desc,
+        "Narrative": "",
+        "Replicable?": repro,
+        "Status": "Unresolved",
+        "Resolution": ""
+    }
+
+    payload = {
+        "store_name": sName,
+        "issue": newIssue
+    }
+
+    try:
+        response = requests.post(f"{API_BASE}/issues", json=payload, timeout=60)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print("\n" + c.red(f"Error sending issue to server: {e}"))
+        return
+
+    print("\n" + c.green(f"Issue '{iName}' added to {sName} and synced to the server."))
+
+# -----------------------------------
+# ISSUE VIEWING
+# -----------------------------------
+
 def issueViewOne():
     """View issues for a single store by name or number."""
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    stores = get_stores()  # calls GET /stores
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     while True:
         print("\n" + c.blue_bg(c.yellow("***** View Issues For One Store *****")))
@@ -341,7 +429,6 @@ def issueViewOne():
         if search_mode in ("n", "name"):
             sName_input = input("\nEnter part or all of the store name (e.g., 'Worcester'): ").strip()
 
-            # Find all stores whose name contains the input (case-insensitive)
             matches = [
                 (store_name, details)
                 for store_name, details in stores.items()
@@ -351,33 +438,15 @@ def issueViewOne():
             if not matches:
                 print("\n" + c.red("No stores found matching that name."))
             else:
-                # use your existing helper that picks SF/WM etc.
                 chosen_name, chosen_details = issueSelectStore(matches)
-
-                # ---------- INLINE "display_store_issues" LOGIC ----------
                 sNum = chosen_details.get("Store Number", "Unknown")
-                issues = chosen_details.get("Known Issues", [])
 
-                print(f"\n{chosen_name} {sNum}")
-                print("Known Issues:")
-
-                if not issues:
-                    print(c.yellow("No issues for this store!"))
+                if isinstance(sNum, int):
+                    issues = getIssuesForStore(store_number=sNum)
                 else:
-                    for idx, issue in enumerate(issues, start=1):
-                        issue_name = issue.get("Issue Name") or issue.get("Type") or "Unnamed Issue"
-                        status = issue.get("Status", "Unresolved")
-                        desc = issue.get("Description", "No description provided")
-                        res = issue.get("Resolution", "None Provided")
+                    issues = getIssuesForStore(store_name=chosen_name)
 
-                        print(f"\n{idx}. {issue_name} [{status}]")
-                        if status.lower() == "resolved":
-                            print(f"Resolution: {res}")
-                        else:
-                            print(f"Description: {desc}")
-
-                    print(f"\nnumber of issues: {len(issues)}")
-                # --------------------------------------------------------
+                displayIssues(chosen_name, sNum, issues)
 
         # --- SEARCH BY STORE NUMBER ---
         elif search_mode in ("#", "num", "number"):
@@ -388,83 +457,154 @@ def issueViewOne():
                 print("\n" + c.red("Store number must be a number."))
             else:
                 chosen_name = None
-                chosen_details = None
 
                 for store_name, details in stores.items():
                     if details.get("Store Number") == sNum_int:
-                        chosen_name, chosen_details = store_name, details
+                        chosen_name = store_name
                         break
 
                 if chosen_name is None:
                     print("\n" + c.red("Store number not found."))
                 else:
-                    # ---------- INLINE "display_store_issues" LOGIC ----------
-                    sNum = chosen_details.get("Store Number", "Unknown")
-                    issues = chosen_details.get("Known Issues", [])
-
-                    print(f"\n{chosen_name} {sNum}")
-                    print("Known Issues:")
-
-                    if not issues:
-                        print(c.yellow("No issues for this store!"))
-                    else:
-                        for idx, issue in enumerate(issues, start=1):
-                            issue_name = issue.get("Issue Name") or issue.get("Type") or "Unnamed Issue"
-                            status = issue.get("Status", "Unresolved")
-                            desc = issue.get("Description", "No description provided")
-                            res = issue.get("Resolution", "None Provided")
-
-                            print(f"\n{idx}. {issue_name} [{status}]")
-                            if status.lower() == "resolved":
-                                print(f"Resolution: {res}")
-                            else:
-                                print(f"Description: {desc}")
-
-                        print(f"\nnumber of issues: {len(issues)}")
-                    # --------------------------------------------------------
+                    issues = getIssuesForStore(store_number=sNum_int)
+                    displayIssues(chosen_name, sNum_int, issues)
 
         else:
             print("\n" + c.red("Invalid choice. Please enter N for name or # for number."))
-            continue  # back to top of while True
+            continue
 
-        # Ask if they want to look up another store
         again = input("\nTry another store? (Y/N): ").strip().lower()
         if again != "y":
             break
 
+def issueViewAll():
+    """
+    View all issues for all stores.
+    This loops over store metadata, and for each store calls /issues/by-store.
+    """
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
+
+    print("\n" + c.blue_bg(c.yellow("*****Stores with Known issues*****\n")))
+    has_issues = False
+
+    for sName, details in stores.items():
+        sNum = details.get("Store Number")
+        if sNum is None:
+            continue
+
+        issues = getIssuesForStore(store_number=sNum)
+        if not issues:
+            continue
+
+        has_issues = True
+        displayIssues(sName, sNum, issues)
+        print("-" * 40)
+
+    if not has_issues:
+        print(c.yellow("\nNo stores have reported issues at this time"))
+
+# -----------------------------------
+# ISSUE EDIT / UPDATE
+# -----------------------------------
+
+def issueResAdd(issue_legacy: dict):
+    """Add resolution text to a legacy-style issue dict."""
+    res = input("Resolution: ").strip()
+    issue_legacy["Resolution"] = res
+    print(c.green("Resolution added successfully"))
+
+def issueUpdate():
+    """
+    Update only status (and optionally resolution) of an issue.
+    Uses DB for selection, then sends legacy-style updated_issue to /issues/update.
+    """
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
+
+    sNum = input("Enter the store number: ").strip()
+
+    # Locate store name from metadata
+    sName = None
+    sNum_int = None
+    try:
+        sNum_int = int(sNum)
+    except ValueError:
+        print(c.red("Store number must be a number."))
+        return
+
+    for store, details in stores.items():
+        if details.get("Store Number") == sNum_int:
+            sName = store
+            break
+
+    if not sName:
+        print(c.red("Store number not found. Please try again."))
+        return
+
+    # Choose an issue from DB rows
+    chosen_row = select_issue_for_store(sName, sNum_int)
+    if chosen_row is None:
+        return
+
+    issue_id = chosen_row.get("id")
+    if issue_id is None:
+        print(c.red("Selected issue has no 'id'; cannot update."))
+        return
+
+    # Build legacy-style issue dict for updating
+    issue_legacy = build_legacy_issue_from_db(sName, chosen_row)
+
+    # Prompt for updated status
+    statusNew = input("\nEnter the updated status (Unresolved, In Progress, Resolved): ").strip()
+    issue_legacy["Status"] = statusNew
+
+    if statusNew.lower() == "resolved":
+        addRes = input("\nWould you like to add a resolution for this issue (Y/N)?: ").strip().lower()
+        if addRes == "y":
+            issueResAdd(issue_legacy)
+
+    print("\n" + c.yellow("Saving changes to server..."))
+    if apiUpdate(issue_id, issue_legacy):
+        print(c.green("Status updated and synced to cloud."))
+    else:
+        print(c.red("Failed to update issue on server."))
+
 def issueEdit():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    """
+    Edit any attribute of an existing issue.
+    Uses DB for selection, then sends legacy-style updated_issue to /issues/update.
+    """
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
     # 1. PICK STORE
-    sName = issueStoreSearch(stores)
+    sName = issueStoreSearch()
     if sName is None:
         print("\n" + c.red("Edit cancelled. Returning to main menu."))
         return
 
     store_details = stores.get(sName, {})
-    issues = store_details.get("Known Issues", [])
+    sNum = store_details.get("Store Number")
 
-    if not issues:
-        print("\n" + c.yellow(f"{sName} has no issues to edit."))
+    # 2. PICK ISSUE (from DB)
+    chosen_row = select_issue_for_store(sName, sNum)
+    if chosen_row is None:
         return
 
-    # 2. PICK ISSUE
-    print(f"\nIssues for {sName} (Store {store_details.get('Store Number', 'Unknown')}):")
-    for idx, issue in enumerate(issues, start=1):
-        issue_name = issue.get("Issue Name", "Unnamed Issue")
-        status = issue.get("Status", "Unresolved")
-        print(f"{idx}. {issue_name} [{status}]")
+    issue_id = chosen_row.get("id")
+    if issue_id is None:
+        print(c.red("Selected issue has no 'id'; cannot update."))
+        return
 
-    while True:
-        choice = input("\nSelect an issue number to edit: ").strip()
-        if choice.isdigit():
-            issue_index = int(choice)
-            if 1 <= issue_index <= len(issues):
-                break
-        print(c.red("Invalid selection. Please enter a valid issue number."))
-
-    issue = issues[issue_index - 1]
+    # Build legacy-style editable dict
+    issue = build_legacy_issue_from_db(sName, chosen_row)
 
     # 3. EDIT LOOP
     while True:
@@ -491,7 +631,7 @@ def issueEdit():
         # ---- DEVICE ----
         elif "device" in opt:
             new_dev = input("New Device (e.g., Computer, Printer, Phone): ").strip()
-            issue["Device Name"] = new_dev
+            issue["Type"] = new_dev
             print(c.green(f"Device changed to '{new_dev}'."))
 
         # ---- CATEGORY (maps to 'Type') ----
@@ -550,17 +690,80 @@ def issueEdit():
             print(c.red("Invalid choice. Please type one of the menu options."))
             continue
 
-    # 4. SAVE CHANGES BACK TO JSON
-    with open("Stores.json", "w") as file:
-        json.dump(stores, file, indent=4)
+    # 4. SAVE CHANGES VIA API
+    print("\n" + c.yellow("Saving changes to server..."))
+    if apiUpdate(issue_id, issue):
+        print(c.green("Changes saved."))
+    else:
+        print(c.red("Changes were NOT saved to the server."))
 
-    print("\n" + c.green("Changes saved."))
+def issueRemove():
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
+
+    sNum = input("Enter the store number: ").strip()
+
+    # Locate store name from metadata
+    sName = None
+    try:
+        sNum_int = int(sNum)
+    except ValueError:
+        print(c.red("Store number must be a number."))
+        return
+
+    for store, details in stores.items():
+        if details.get("Store Number") == sNum_int:
+            sName = store
+            break
+
+    if not sName:
+        print(c.red("Store number not found. Please try again."))
+        return
+
+    # Choose an issue from DB rows
+    chosen_row = select_issue_for_store(sName, sNum_int)
+    if chosen_row is None:
+        return
+
+    issue_id = chosen_row.get("id")
+    if issue_id is None:
+        print(c.red("Selected issue has no 'id'; cannot delete."))
+        return
+
+    issue_name = chosen_row.get("issue_name") or "Unnamed Issue"
+    status = chosen_row.get("status") or "Unresolved"
+
+    print(f"\nYou are about to DELETE this issue:")
+    print(f"  Store: {sName} ({sNum_int})")
+    print(f"  Issue: {issue_name} [{status}]")
+    confirm = input("\nAre you sure? This cannot be undone. (Y/N): ").strip().lower()
+
+    if confirm != "y":
+        print(c.yellow("Delete cancelled."))
+        return
+
+    print("\n" + c.yellow("Deleting issue on server..."))
+    if apiDelete(issue_id):
+        print(c.green("Issue successfully deleted from the database."))
+    else:
+        print(c.red("Issue could not be deleted."))
+
+# -----------------------------------
+# ISSUE PRINTING
+# -----------------------------------
 
 def issuePrintAll():
-    with open("Stores.json", "r") as file:
-        stores = json.load(file)
+    """
+    Export all known issues (from DB) grouped by store into a text file.
+    """
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
 
-    print("\nCreating dump file")
+    print("\nCreating dump file...")
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     reports_dir = os.path.join(current_dir, "Reports")
@@ -574,35 +777,46 @@ def issuePrintAll():
         has_issues = False
 
         for sName, details in stores.items():
-            knownIssues = details.get("Known Issues", [])
-            if len(knownIssues) > 0:
-                has_issues = True
+            sNum = details.get("Store Number")
+            if sNum is None:
+                continue
 
-                txt_file.write(f"Store: {sName}\n")
-                txt_file.write(f"Store Number: {details['Store Number']}\n")
-                txt_file.write("Known Issues: \n")
-                for idx, issue in enumerate(knownIssues, start=1):
-                    issue_name = issue.get("Issue Name", "Unnamed Issue")
+            issues = getIssuesForStore(store_number=sNum)
+            if not issues:
+                continue
 
-                    txt_file.write(f"  {idx}. {issue_name}\n")
-                    txt_file.write(f"     Status: {issue.get('Status', 'Unresolved')}\n")
-                    txt_file.write(f"     Priority: {issue.get('Priority', 'N/A')}\n")
-                    txt_file.write(f"     Computer: {issue.get('Computer Number', 'N/A')}\n")
-                    txt_file.write(f"     Type: {issue.get('Type', 'N/A')}\n")
-                    txt_file.write(f"     Description: {issue.get('Description', 'N/A')}\n")
-                    txt_file.write(f"     Resolution: {issue.get('Resolution', 'No Resolution Provided')}\n")
-                    txt_file.write("-" * 40 + "\n\n")
+            has_issues = True
+
+            txt_file.write(f"Store: {sName}\n")
+            txt_file.write(f"Store Number: {sNum}\n")
+            txt_file.write("Known Issues:\n")
+
+            for idx, issue in enumerate(issues, start=1):
+                issue_name = issue.get("issue_name", "Unnamed Issue")
+                status = issue.get("status", "Unresolved")
+                priority = issue.get("priority", "N/A")
+                computer = issue.get("computer_number", "N/A")
+                dev_type = issue.get("device_type", "N/A")
+                desc = issue.get("description", "N/A")
+                res = issue.get("resolution", "No Resolution Provided")
+
+                txt_file.write(f"  {idx}. {issue_name}\n")
+                txt_file.write(f"     Status: {status}\n")
+                txt_file.write(f"     Priority: {priority}\n")
+                txt_file.write(f"     Computer: {computer}\n")
+                txt_file.write(f"     Type: {dev_type}\n")
+                txt_file.write(f"     Description: {desc}\n")
+                txt_file.write(f"     Resolution: {res}\n")
+                txt_file.write("-" * 40 + "\n\n")
 
         if not has_issues:
             txt_file.write("No known issues reported for any stores at this time.\n")
 
-
     print("\n" + c.green(f"Known issues have been exported to {txt_file_path}."))
 
-
-
-
-
+# -----------------------------------
+# MAIN MENU LOOP
+# -----------------------------------
 
 while True:
     print(BLUE_BG + YELLOW + "WELCOME TO CCT ISSUE TRACKER v2!")
@@ -611,6 +825,7 @@ while True:
     print("UPDATE: Update the status of an existing issue")
     print("EDIT: Edit any attribute of an existing issue")
     print("VIEW: View all current issues or all issues in a specific location")
+    print("REMOVE: Delete an existing issue")
     print("PRINT: Export a list of all Known Issues to a text file")
     print("EXIT: Exit the program")
 
@@ -630,14 +845,20 @@ while True:
 
     elif choice == "VIEW":
         print("\n" + c.blue_bg(c.yellow("*****View issues*****")))
-        decision = input("Would you like do view all issues (a) or issues for a specific location (s)?: ").lower()
+        decision = input("Would you like to view all issues (a) or issues for a specific location (s)?: ").lower()
         if decision == "a":
             print("\n" + c.blue_bg(c.yellow("*****View all issues*****")))
             issueViewAll()
-
         elif decision == "s":
             print("\n" + c.blue_bg(c.yellow("*****View issues by location*****")))
             issueViewOne()
+        else:
+            print(c.red("Invalid selection."))
+
+    elif choice == "REMOVE":
+        print("\n" + c.blue_bg(c.yellow("*****Remove an issue*****")))
+        issueRemove()
+
 
     elif choice == "PRINT":
         issuePrintAll()
@@ -647,5 +868,4 @@ while True:
         break
 
     else:
-        print(c.red("Invalid selection! please try again!"))
-
+        print(c.red("Invalid selection! Please try again!"))
