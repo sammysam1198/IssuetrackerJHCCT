@@ -269,6 +269,39 @@ def update_issue():
 
     return jsonify({"message": "Issue updated", "issue": updated_row}), 200
 
+@app.post("/issues/delete")
+def delete_issue():
+    """
+    Delete an existing issue from the DB.
+
+    Expected JSON body:
+    {
+      "issue_id": 123
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    issue_id = data.get("issue_id")
+    if issue_id is None:
+        return jsonify({"error": "issue_id is required"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM issues WHERE id = %s RETURNING *;",
+        (issue_id,),
+    )
+    deleted = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not deleted:
+        return jsonify({"error": "Issue not found"}), 404
+
+    return jsonify({"message": "Issue deleted", "issue": deleted}), 200
 
 # Initialize DB schema when the app starts (works with gunicorn)
 init_db()
