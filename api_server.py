@@ -269,6 +269,64 @@ def update_issue():
 
     return jsonify({"message": "Issue updated", "issue": updated_row}), 200
 
+@app.get("/issues/search")
+def search_issues():
+    """
+    Advanced search for issues.
+
+    Query params (all optional, at least one required):
+      store_number=12345
+      category=some_text
+      status=Unresolved
+      device=Computer
+      name=Printer%20Down
+
+    All text fields use ILIKE '%value%' (case-insensitive, partial match).
+    """
+    store_number = request.args.get("store_number")
+    category = request.args.get("category")   # maps to device_type
+    status = request.args.get("status")
+    device = request.args.get("device")       # also maps to device_type
+    name = request.args.get("name")           # maps to issue_name
+
+    if not any([store_number, category, status, device, name]):
+        return jsonify({"error": "At least one search parameter is required"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+
+    query = "SELECT * FROM issues WHERE 1=1"
+    params = []
+
+    if store_number:
+        query += " AND store_number = %s"
+        params.append(int(store_number))
+
+    # In your current schema, 'category' and 'device' both map to device_type.
+    if category:
+        query += " AND device_type ILIKE %s"
+        params.append(f"%{category}%")
+
+    if status:
+        query += " AND status ILIKE %s"
+        params.append(f"%{status}%")
+
+    if device:
+        query += " AND device_type ILIKE %s"
+        params.append(f"%{device}%")
+
+    if name:
+        query += " AND issue_name ILIKE %s"
+        params.append(f"%{name}%")
+
+    cur.execute(query, params)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return jsonify(rows), 200
+
+
 @app.post("/issues/delete")
 def delete_issue():
     """
