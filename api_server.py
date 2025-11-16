@@ -21,7 +21,7 @@ def get_db_conn():
 
 
 def init_db():
-    """Create issues table if it doesn't exist."""
+    """Create issues table if it doesn't exist and ensure new columns exist."""
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute(
@@ -34,6 +34,7 @@ def init_db():
             priority TEXT,
             computer_number TEXT,
             device_type TEXT,
+            category TEXT,
             description TEXT,
             narrative TEXT,
             replicable TEXT,
@@ -44,6 +45,8 @@ def init_db():
         );
         """
     )
+    # In case the table already existed without 'category', add it.
+    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;")
     conn.commit()
     cur.close()
     conn.close()
@@ -75,11 +78,12 @@ def add_issue():
     {
       "store_name": "Store 123 - Main St",
       "issue": {
-        "Issue Name": "...",
+        "Name": "...",              # or "Issue Name"
         "Priority": "...",
-        "Store Number": "123",
+        "Store Number": "12345",
         "Computer Number": "PC-01",
-        "Type": "Computer",
+        "Device": "Computer",       # <--- device type
+        "Category": "Hardware",     # <--- problem category
         "Description": "...",
         "Narrative": "",
         "Replicable?": "Yes/No",
@@ -100,10 +104,11 @@ def add_issue():
 
     # Pull fields out of the issue dict
     store_number = issue.get("Store Number")
-    issue_name = issue.get("Issue Name")
+    issue_name = issue.get("Name") or issue.get("Issue Name")
     priority = issue.get("Priority")
     computer_number = issue.get("Computer Number")
-    device_type = issue.get("Type")
+    device_type = issue.get("Device")          # <--- NEW
+    category = issue.get("Category")           # <--- NEW
     description = issue.get("Description")
     narrative = issue.get("Narrative", "")
     replicable = issue.get("Replicable?")
@@ -116,10 +121,10 @@ def add_issue():
         """
         INSERT INTO issues (
             store_name, store_number, issue_name, priority,
-            computer_number, device_type, description, narrative,
-            replicable, status, resolution
+            computer_number, device_type, category,
+            description, narrative, replicable, status, resolution
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *;
         """,
         (
@@ -129,6 +134,7 @@ def add_issue():
             priority,
             computer_number,
             device_type,
+            category,
             description,
             narrative,
             replicable,
@@ -142,7 +148,6 @@ def add_issue():
     conn.close()
 
     return jsonify({"message": "Issue added", "issue": new_issue}), 201
-
 
 @app.get("/issues/by-store")
 def get_issues_by_store():
@@ -197,7 +202,20 @@ def update_issue():
     Expected JSON body:
     {
       "issue_id": 123,
-      "updated_issue": { ...same fields as add_issue... }
+      "updated_issue": {
+          "Store Name": "...",
+          "Store Number": "12345",
+          "Name": "...", or "Issue Name": "...",
+          "Priority": "...",
+          "Computer Number": "...",
+          "Device": "Computer",
+          "Category": "Hardware",
+          "Description": "...",
+          "Narrative": "...",
+          "Replicable?": "...",
+          "Status": "...",
+          "Resolution": "..."
+      }
     }
     """
     data = request.get_json(silent=True)
@@ -210,13 +228,13 @@ def update_issue():
     if issue_id is None or updated_issue is None:
         return jsonify({"error": "issue_id and updated_issue are required"}), 400
 
-    # Pull updated fields
-    store_name = updated_issue.get("Store Name") or updated_issue.get("Store_Name")  # optional
+    store_name = updated_issue.get("Store Name") or updated_issue.get("Store_Name")
     store_number = updated_issue.get("Store Number")
-    issue_name = updated_issue.get("Issue Name")
+    issue_name = updated_issue.get("Name") or updated_issue.get("Issue Name")
     priority = updated_issue.get("Priority")
     computer_number = updated_issue.get("Computer Number")
-    device_type = updated_issue.get("Type")
+    device_type = updated_issue.get("Device")
+    category = updated_issue.get("Category")
     description = updated_issue.get("Description")
     narrative = updated_issue.get("Narrative", "")
     replicable = updated_issue.get("Replicable?")
@@ -235,6 +253,7 @@ def update_issue():
             priority = %s,
             computer_number = %s,
             device_type = %s,
+            category = %s,
             description = %s,
             narrative = %s,
             replicable = %s,
@@ -251,6 +270,7 @@ def update_issue():
             priority,
             computer_number,
             device_type,
+            category,
             description,
             narrative,
             replicable,
