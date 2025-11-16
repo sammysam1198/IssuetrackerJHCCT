@@ -1,0 +1,1 @@
+this is the mobile version. it doesnt have any of the coloring that the computer version has but this is just a py file. idk how to make APKs yet or do GUI stuff so for now it just runs in any iOS or android python compiler
