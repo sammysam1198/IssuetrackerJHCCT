@@ -324,9 +324,9 @@ def search_issues():
 
     # In your current schema, 'category' and 'device' both map to device_type.
     if category:
-        query += " AND device_type ILIKE %s"
+        query += " AND category ILIKE %s"
         params.append(f"%{category}%")
-
+    
     if status:
         query += " AND status ILIKE %s"
         params.append(f"%{status}%")
