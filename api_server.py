@@ -381,6 +381,41 @@ def delete_issue():
 
     return jsonify({"message": "Issue deleted", "issue": deleted}), 200
 
+
+@app.post("/admin/fix-device-category")
+def fix_device_category():
+    """
+    ONE-TIME migration:
+    - Backup issues table to issues_backup
+    - Swap device_type and category for rows that look obviously flipped.
+    """
+    conn = get_db_conn()
+    cur = conn.cursor()
+
+    # 1) Backup current data
+    cur.execute("DROP TABLE IF EXISTS issues_backup;")
+    cur.execute("CREATE TABLE issues_backup AS TABLE issues;")
+
+    # 2) Swap device_type and category where they look reversed
+    cur.execute(
+        """
+        UPDATE issues
+        SET
+            device_type = category,
+            category    = device_type
+        WHERE device_type IN ('Connectivity', 'Network', 'Software', 'Hardware')
+           OR category IN ('Computer', 'Printer', 'Phone', 'Laptop', 'Tablet');
+        """
+    )
+    affected = cur.rowcount
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Migration complete", "rows_updated": affected}), 200
+
+
 # Initialize DB schema when the app starts (works with gunicorn)
 init_db()
 
