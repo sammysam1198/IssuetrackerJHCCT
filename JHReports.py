@@ -40,7 +40,6 @@ RESET = "\033[0m"
 
 API_BASE = "https://api-server-jh.onrender.com"  # Render URL
 
-
 # -----------------------------------
 # API + STORE HELPERS
 # -----------------------------------
@@ -59,14 +58,56 @@ def displayIssues(store_name: str, store_number, issues: list):
         status = issue.get("status") or "Unresolved"
         desc = issue.get("description") or "No description provided"
         res = issue.get("resolution") or "None Provided"
+        device_type = issue.get("device_type") or "N/A"
+        category = issue.get("category") or "N/A"
+        computer = issue.get("computer_number") or "N/A"
+        priority = issue.get("priority") or "N/A"
 
         print(f"\n{idx}. {issue_name} [{status}]")
+        print(f"   Device: {device_type}")
+        print(f"   Category: {category}")
+        print(f"   Computer: {computer}")
+        print(f"   Priority: {priority}")
+
         if status.lower() == "resolved":
-            print(f"Resolution: {res}")
+            print(f"   Resolution: {res}")
         else:
-            print(f"Description: {desc}")
+            print(f"   Description: {desc}")
 
     print(f"\nnumber of issues: {len(issues)}")
+
+def displaySearchResults(issues: list):
+    """
+    Pretty-print results of a search across possibly multiple stores.
+    """
+    if not issues:
+        print(c.yellow("\nNo issues matched your search criteria."))
+        return
+
+    print("\n" + c.blue_bg(c.yellow("***** SEARCH RESULTS *****")))
+
+    for idx, issue in enumerate(issues, start=1):
+        store_name = issue.get("store_name", "Unknown Store")
+        store_number = issue.get("store_number", "N/A")
+        issue_name = issue.get("issue_name", "Unnamed Issue")
+        status = issue.get("status", "Unresolved")
+        priority = issue.get("priority", "N/A")
+        device_type = issue.get("device_type", "N/A")
+        category = issue.get("category", "N/A")
+        computer_number = issue.get("computer_number", "N/A")
+        desc = issue.get("description", "No description provided")
+        res = issue.get("resolution", "No resolution provided")
+
+        print(f"\n{idx}. {issue_name} [{status}]")
+        print(f"   Store: {store_name} ({store_number})")
+        print(f"   Device: {device_type}")
+        print(f"   Category: {category}")
+        print(f"   Computer: {computer_number}")
+        print(f"   Priority: {priority}")
+        print(f"   Description: {desc}")
+        print(f"   Resolution: {res}")
+
+    print(f"\nTotal matches: {len(issues)}")
 
 def apiLoad():
     """Load store metadata from the API (from Stores.json on the server)."""
@@ -81,6 +122,40 @@ def apiLoad():
     except requests.RequestException as e:
         print("\n" + c.red(f"Error loading store list from server: {e}"))
         return None
+
+def apiSearchIssues(mode: int, term: str):
+    """
+    Call GET /issues/search with the appropriate parameter based on mode:
+      1 = store_number
+      2 = category
+      3 = status
+      4 = device
+      5 = name (issue name)
+    Returns a list of matching issues (DB rows) or [] on error.
+    """
+    params = {}
+
+    if mode == 1:
+        params["store_number"] = term
+    elif mode == 2:
+        params["category"] = term
+    elif mode == 3:
+        params["status"] = term
+    elif mode == 4:
+        params["device"] = term
+    elif mode == 5:
+        params["name"] = term
+    else:
+        print(c.red("Invalid search mode."))
+        return []
+
+    try:
+        resp = requests.get(f"{API_BASE}/issues/search", params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        print(c.red(f"Error searching issues on server: {e}"))
+        return []
 
 def getIssuesForStore(store_number=None, store_name=None):
     """
@@ -113,16 +188,17 @@ def get_stores():
 
 def build_legacy_issue_from_db(store_name: str, row: dict) -> dict:
     """
-    Convert a DB row (issue_name, status, ...) into the legacy "Issue Name" style
-    that /issues/update expects in `updated_issue`.
+    Convert a DB row into the legacy-style dict used for /issues/update.
     """
     return {
         "Store Name": store_name,
         "Store Number": row.get("store_number"),
-        "Issue Name": row.get("issue_name"),
+        "Name": row.get("issue_name"),
+        "Issue Name": row.get("issue_name"),  # keep both keys for safety
         "Priority": row.get("priority"),
         "Computer Number": row.get("computer_number"),
-        "Type": row.get("device_type"),
+        "Device": row.get("device_type"),     # Device
+        "Category": row.get("category"),      # Category
         "Description": row.get("description"),
         "Narrative": row.get("narrative") or "",
         "Replicable?": row.get("replicable"),
@@ -163,10 +239,24 @@ def apiDelete(issue_id: int) -> bool:
         print(c.red(f"Error deleting issue on server: {e}"))
         return False
 
+def prompt_with_exit(prompt: str):
+    """
+    Wrapper for input() that lets the user cancel by typing X / EXIT / QUIT.
+    Returns:
+      - the user input (str) if they continue
+      - None if they chose to cancel
+    """
+    value = input(prompt).strip()
+    if value.lower() in ("x", "exit", "quit"):
+        return None
+    return value
+
+def pause():
+    input("\nPress ENTER to return to the main menu...")
+
 # -----------------------------------
 # STORE SEARCH / SELECTION
 # -----------------------------------
-
 def issueStoreSearch():
     stores = get_stores()
     if stores is None:
@@ -315,7 +405,8 @@ def select_issue_for_store(store_name: str, store_number: int):
         status = issue.get("status") or "Unresolved"
         comp = issue.get("computer_number") or "N/A"
         dev = issue.get("device_type") or "N/A"
-        print(f"{idx}. {issue_name} [{status}] (Device: {dev}, Computer: {comp})")
+        cat = issue.get("category") or "N/A"
+        print(f"{idx}. {issue_name} [{status}] (Device: {dev}, Category: {cat}, Computer: {comp})")
 
     while True:
         choice = input("\nSelect an issue number: ").strip()
@@ -340,7 +431,10 @@ def issueAdd():
 
     # Store number input + validation
     while True:
-        sNum = input("\n" + c.blue_bg(c.yellow("Store number: ")))
+        sNum = prompt_with_exit("\n" + c.blue_bg(c.yellow("Store number: ")))
+        if sNum is None:
+            print(c.yellow("Issue entry cancelled."))
+            return
 
         try:
             sNum_int = int(sNum)
@@ -352,24 +446,70 @@ def issueAdd():
             print("\n" + c.red("Store number not found! Please enter a valid number."))
             continue
 
-        break
+        break  # valid store number
 
-    devName = input(
+    devName = prompt_with_exit(
         "\n"
         + c.blue_bg(
-            c.yellow("What type of device is experiencing the issue? (e.g., Phone, Computer etc.): ")
+            c.yellow(
+                "What type of device is experiencing the issue? "
+                "(e.g., Phone, Computer etc.): "
+            )
         )
-    ).strip()
+    )
+    if devName is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
+    devName = devName.strip()
 
-    compNum = "N/A"
     if "computer" in devName.lower():
-        compNum = input("\n" + c.blue_bg(c.yellow("Computer experiencing the issue: ")))
+        compNum = prompt_with_exit(
+            "\n" + c.blue_bg(c.yellow("Computer experiencing the issue: "))
+        )
+        if compNum is None:
+            print(c.yellow("Issue entry cancelled."))
+            return
+    else:
+        compNum = "N/A"
 
-    cat = input("\n" + c.blue_bg(c.yellow("Issue Category: ")))
-    priority = input("\n1. Critical\n2. Functional\n3. Cosmetic:\n\nPriority: ")
-    desc = input("\n" + c.blue_bg(c.yellow("Describe the issue: ")))
-    repro = input("\n" + c.blue_bg(c.yellow("Has this issue been reproduced on any other systems (Yes/No)?: ")))
-    iName = input("\n" + c.blue_bg(c.yellow("Give this issue a name: ")))
+    cat = prompt_with_exit(
+        "\n" + c.blue_bg(c.yellow("Issue Category (Hardware/Software/Network/etc.): "))
+    )
+    if cat is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
+
+    priority = prompt_with_exit(
+        "\n1. Critical\n2. Functional\n3. Cosmetic:\n\n"
+        + c.blue_bg(c.yellow("Priority: "))
+    )
+    if priority is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
+
+    desc = prompt_with_exit(
+        "\n" + c.blue_bg(c.yellow("Describe the issue: "))
+    )
+    if desc is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
+
+    repro = prompt_with_exit(
+        "\n"
+        + c.blue_bg(
+            c.yellow("Has this issue been reproduced on any other systems (Yes/No)?: ")
+        )
+    )
+    if repro is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
+
+    iName = prompt_with_exit(
+        "\n" + c.blue_bg(c.yellow("Give this issue a name: "))
+    )
+    if iName is None:
+        print(c.yellow("Issue entry cancelled."))
+        return
 
     # Resolve sName from store number
     sName = None
@@ -384,11 +524,13 @@ def issueAdd():
 
     # Define new issue in legacy format (matches backend add_issue expectation)
     newIssue = {
+        "Name": iName,
         "Issue Name": iName,
         "Priority": priority,
         "Store Number": sNum,
         "Computer Number": compNum,
-        "Type": cat,
+        "Device": devName,
+        "Category": cat,
         "Description": desc,
         "Narrative": "",
         "Replicable?": repro,
@@ -409,6 +551,9 @@ def issueAdd():
         return
 
     print("\n" + c.green(f"Issue '{iName}' added to {sName} and synced to the server."))
+
+    pause()
+
 
 # -----------------------------------
 # ISSUE VIEWING
@@ -476,6 +621,7 @@ def issueViewOne():
         again = input("\nTry another store? (Y/N): ").strip().lower()
         if again != "y":
             break
+    pause()
 
 def issueViewAll():
     """
@@ -506,6 +652,59 @@ def issueViewAll():
     if not has_issues:
         print(c.yellow("\nNo stores have reported issues at this time"))
 
+    pause()
+
+def issueSearch():
+    """
+    Advanced search menu for issues.
+    Lets the user pick a field and enter search parameters,
+    then queries the DB via /issues/search.
+    """
+    while True:
+        print("\n" + c.blue_bg(c.yellow("********** SEARCH FOR AN ISSUE **********")))
+        print("\nSearch by any of the following:")
+        print("1. Store Number")
+        print("2. Category")
+        print("3. Status")
+        print("4. Device")
+        print("5. Name")
+        print("6. Exit Search")
+
+        choice = input("\nSelect a search mode (1-6): ").strip()
+
+        if choice == "6":
+            print(c.yellow("Exiting search."))
+            return
+
+        if choice not in {"1", "2", "3", "4", "5"}:
+            print(c.red("Invalid selection. Please choose a number from 1 to 6."))
+            continue
+
+        mode = int(choice)
+
+        print("\nEnter Search Parameters:")
+        term = input("> ").strip()
+
+        if not term:
+            print(c.red("Search term cannot be empty."))
+            continue
+
+        # For store number, validate numeric
+        if mode == 1:
+            if not term.isdigit():
+                print(c.red("Store number must be a number."))
+                continue
+
+        results = apiSearchIssues(mode, term)
+        displaySearchResults(results)
+
+        again = input("\nPerform another search? (Y/N): ").strip().lower()
+        if again != "y":
+            break
+
+    pause()
+
+
 # -----------------------------------
 # ISSUE EDIT / UPDATE
 # -----------------------------------
@@ -515,6 +714,7 @@ def issueResAdd(issue_legacy: dict):
     res = input("Resolution: ").strip()
     issue_legacy["Resolution"] = res
     print(c.green("Resolution added successfully"))
+    pause()
 
 def issueUpdate():
     """
@@ -574,6 +774,8 @@ def issueUpdate():
     else:
         print(c.red("Failed to update issue on server."))
 
+    pause()
+
 def issueEdit():
     """
     Edit any attribute of an existing issue.
@@ -625,19 +827,20 @@ def issueEdit():
         # ---- NAME ----
         if "name" in opt and "issue" not in opt and "add" not in opt:
             new_name = input("New Issue Name: ").strip()
-            issue["Issue Name"] = new_name
+            issue["Name"] = new_name
+            issue["Issue Name"] = new_name  # keep both keys in sync
             print(c.green(f"Issue name changed to '{new_name}'."))
 
         # ---- DEVICE ----
         elif "device" in opt:
             new_dev = input("New Device (e.g., Computer, Printer, Phone): ").strip()
-            issue["Type"] = new_dev
+            issue["Device"] = new_dev
             print(c.green(f"Device changed to '{new_dev}'."))
 
-        # ---- CATEGORY (maps to 'Type') ----
+        # ---- CATEGORY ----
         elif "category" in opt or opt == "cat":
             new_cat = input("New Category: ").strip()
-            issue["Type"] = new_cat
+            issue["Category"] = new_cat
             print(c.green(f"Category changed to '{new_cat}'."))
 
         # ---- COMPUTER NUMBER ----
@@ -697,6 +900,8 @@ def issueEdit():
     else:
         print(c.red("Changes were NOT saved to the server."))
 
+    pause()
+
 def issueRemove():
     stores = get_stores()
     if stores is None:
@@ -750,6 +955,8 @@ def issueRemove():
     else:
         print(c.red("Issue could not be deleted."))
 
+    pause()
+
 # -----------------------------------
 # ISSUE PRINTING
 # -----------------------------------
@@ -797,6 +1004,7 @@ def issuePrintAll():
                 priority = issue.get("priority", "N/A")
                 computer = issue.get("computer_number", "N/A")
                 dev_type = issue.get("device_type", "N/A")
+                category = issue.get("category", "N/A")
                 desc = issue.get("description", "N/A")
                 res = issue.get("resolution", "No Resolution Provided")
 
@@ -804,7 +1012,8 @@ def issuePrintAll():
                 txt_file.write(f"     Status: {status}\n")
                 txt_file.write(f"     Priority: {priority}\n")
                 txt_file.write(f"     Computer: {computer}\n")
-                txt_file.write(f"     Type: {dev_type}\n")
+                txt_file.write(f"     Device: {dev_type}\n")
+                txt_file.write(f"     Category: {category}\n")
                 txt_file.write(f"     Description: {desc}\n")
                 txt_file.write(f"     Resolution: {res}\n")
                 txt_file.write("-" * 40 + "\n\n")
@@ -813,6 +1022,75 @@ def issuePrintAll():
             txt_file.write("No known issues reported for any stores at this time.\n")
 
     print("\n" + c.green(f"Known issues have been exported to {txt_file_path}."))
+
+    pause()
+
+# -----------------------------------
+# UTILITIES AND HELPERS
+# -----------------------------------
+
+def show_store_info(name, details):
+    print("\n" + c.green("Store Information"))
+    print(c.green("----------------------------"))
+
+    print(f"Store Name: {name}")
+    print(f"Store Number: {details.get('Store Number', 'N/A')}")
+    print(f"State: {details.get('State', 'Unknown')}")
+    print(f"Type: {details.get('Type', 'Unknown')}")
+    print(f"Number of Computers: {details.get('Computers', 'Unknown')}")
+    print(f"Known Issues: {len(details.get('Known Issues', []))} total")
+
+    print(c.green("----------------------------"))
+    print()
+
+def storeLookup():
+    stores = get_stores()
+    if stores is None:
+        print(c.red("Could not connect to server!"))
+        return
+
+    print("\n" + c.yellow("Store Lookup"))
+    print(c.yellow("You can enter either a store NAME or a store NUMBER."))
+
+    query = input("\nEnter store name or number: ").strip()
+
+    if not query:
+        print(c.red("Lookup cancelled."))
+        return
+
+    # --- TRY MATCHING AS STORE NUMBER ---
+    if query.isdigit():
+        for name, details in stores.items():
+            if str(details.get("Store Number", "")).strip() == query:
+                return show_store_info(name, details)
+        print(c.red(f"No store found with number {query}."))
+        return
+
+    # --- TRY MATCHING AS STORE NAME ---
+    # Case-insensitive match
+    lowered_query = query.lower()
+    for name, details in stores.items():
+        if name.lower() == lowered_query:
+            return show_store_info(name, details)
+
+    # --- Partial match fallback (optional but very useful) ---
+    partial_matches = [
+        (name, det)
+        for name, det in stores.items()
+        if lowered_query in name.lower()
+    ]
+
+    if len(partial_matches) == 1:
+        name, details = partial_matches[0]
+        return show_store_info(name, details)
+    elif len(partial_matches) > 1:
+        print(c.yellow("Multiple stores matched your search:"))
+        for name, det in partial_matches:
+            print(f" - {name} (#{det.get('Store Number')})")
+        return
+
+    print(c.red("No matching store found."))
+    pause()
 
 # -----------------------------------
 # MAIN MENU LOOP
@@ -825,8 +1103,10 @@ while True:
     print("UPDATE: Update the status of an existing issue")
     print("EDIT: Edit any attribute of an existing issue")
     print("VIEW: View all current issues or all issues in a specific location")
+    print("SEARCH: Search for an issue by store, category, status, device, or name")
     print("REMOVE: Delete an existing issue")
     print("PRINT: Export a list of all Known Issues to a text file")
+    print("UTILITY: Open a secondary menu of helpful utilities")
     print("EXIT: Exit the program")
 
     choice = input(RESET + "\n: ").upper()
@@ -855,13 +1135,41 @@ while True:
         else:
             print(c.red("Invalid selection."))
 
+    elif choice == "SEARCH":
+        print("\n" + c.blue_bg(c.yellow("*****Search for issues*****")))
+        issueSearch()
+
     elif choice == "REMOVE":
         print("\n" + c.blue_bg(c.yellow("*****Remove an issue*****")))
         issueRemove()
 
-
     elif choice == "PRINT":
         issuePrintAll()
+
+    elif choice.upper() == "UTILITY":
+        while True:
+            print("\n********** UTILITIES MENU **********")
+            print("1. Store Info Lookup")
+            print("2. Tech Info Per Store")
+            print("3. Return to Main Menu")
+
+            sub_choice = input("\nEnter choice: ").strip()
+
+            # OPTION 1
+            if sub_choice == "1":
+                storeLookup()
+
+            # OPTION 2 (placeholder)
+            elif sub_choice == "2":
+                print("\nThis function isn't finished yet!")
+
+            # EXIT BACK TO MAIN
+            elif sub_choice == "3":
+                print("\nReturning to main menu...")
+                break
+
+            else:
+                print("\nInvalid choice. Try again.")
 
     elif choice == "EXIT":
         print(c.blue_bg(c.yellow("Thank you for using the program! Copyright 2025 ChromaGlow")))
