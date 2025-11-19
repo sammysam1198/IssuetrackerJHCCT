@@ -47,6 +47,25 @@ def init_db():
     )
     # In case the table already existed without 'category', add it.
     cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;")
+
+# ----- NEW: USERS TABLE -----
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            username TEXT NOT NULL,
+            password_hash TEXT,
+            pin_hash TEXT,
+            has_password BOOLEAN NOT NULL DEFAULT FALSE,
+            has_pin BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """
+    )
+
+    
     conn.commit()
     cur.close()
     conn.close()
