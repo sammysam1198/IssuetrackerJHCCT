@@ -3,6 +3,7 @@ import json
 from flask import Flask, jsonify, request
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import bcrypt
 
 app = Flask(__name__)
 
@@ -69,6 +70,60 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+# ------------------------
+# PASSWORD HASHING
+# ------------------------
+def hash_secret(plain: str) -> str:
+    """Hash a password or PIN using bcrypt."""
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(plain.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+#SECRET MEANS LIKE A PASSWORD OR PIN IT'S LIKE AN AUTH KEY
+
+def verify_secret(plain: str, stored_hash: str) -> bool:
+    """Check if plain password/PIN matches stored bcrypt hash."""
+    if not stored_hash:
+        return False
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), stored_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+SPECIAL_CHARS = set('!@#$%^&*":><')
+
+
+def check_password_policy(password: str, username: str):
+    """Return (ok: bool, errors: list[str]) based on your rules."""
+    errors = []
+
+    if len(password) < 8:
+        errors.append("Password must be at least 8 characters long.")
+    if password.lower() == username.lower():
+        errors.append("Password cannot be the same as your username.")
+    if not any(ch.isupper() for ch in password):
+        errors.append("Password must contain at least one uppercase letter.")
+    if not any(ch.islower() for ch in password):
+        errors.append("Password must contain at least one lowercase letter.")
+    if not any(ch.isdigit() for ch in password):
+        errors.append("Password must contain at least one number.")
+    if not any(ch in SPECIAL_CHARS for ch in password):
+        errors.append("Password must contain at least one special character (! @ # $ % ^&*\":><).")
+
+    return len(errors) == 0, errors
+
+
+def check_pin_policy(pin: str):
+    """Simple PIN rule: 4–6 digits only."""
+    if not pin.isdigit():
+        return False, "PIN must contain only digits."
+    if not (4 <= len(pin) <= 6):
+        return False, "PIN must be between 4 and 6 digits."
+    if 0000  in pin:
+        return False, "Pin cannot be all one number"
+        
+    return True, None
+
 
 
 def load_stores():
@@ -86,6 +141,135 @@ def get_stores():
     """Return store metadata from Stores.json (no issues here)."""
     stores = load_stores()
     return jsonify(stores)
+
+@app.post("/auth/register")
+def auth_register():
+    """
+    Create or update a user with hashed password and PIN.
+
+    Expected JSON body:
+    {
+      "email": "Sammi.Fishbein@jtax.com",
+      "username": "FishbeinS",
+      "password": "MyNewPassword123!",
+      "pin": "1234"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    email = data.get("email", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    pin = data.get("pin", "")
+
+    if not email or not username or not password or not pin:
+        return jsonify({"error": "email, username, password, and pin are required"}), 400
+
+    # Optional: enforce corporate domains here
+    lowered = email.lower()
+    if not (lowered.endswith("@jtax.com") or lowered.endswith("@jacksonhewittcoo.com")):
+        return jsonify({"error": "Email domain not allowed"}), 403
+
+    # Normalize username for policy
+    username_norm = username.lower()
+
+    # Check password + PIN rules
+    ok_pw, pw_errors = check_password_policy(password, username_norm)
+    if not ok_pw:
+        return jsonify({"error": "Password does not meet requirements", "details": pw_errors}), 400
+
+    ok_pin, pin_error = check_pin_policy(pin)
+    if not ok_pin:
+        return jsonify({"error": "PIN does not meet requirements", "details": [pin_error]}), 400
+
+    pw_hash = hash_secret(password)
+    pin_hash = hash_secret(pin)
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+
+    # Upsert-like behavior: if email exists, update; otherwise insert.
+    cur.execute(
+        """
+        INSERT INTO users (email, username, password_hash, pin_hash, has_password, has_pin)
+        VALUES (%s, %s, %s, %s, TRUE, TRUE)
+        ON CONFLICT (email)
+        DO UPDATE SET
+            username = EXCLUDED.username,
+            password_hash = EXCLUDED.password_hash,
+            pin_hash = EXCLUDED.pin_hash,
+            has_password = TRUE,
+            has_pin = TRUE,
+            updated_at = NOW();
+        """,
+        (email.lower(), username_norm, pw_hash, pin_hash),
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "User registered/updated successfully."}), 200
+
+
+@app.post("/auth/login")
+def auth_login():
+    """
+    Verify email + password + PIN.
+
+    Expected JSON:
+    {
+      "email": "Sammi.Fishbein@jtax.com",
+      "password": "MyNewPassword123!",
+      "pin": "1234"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+    pin = data.get("pin", "")
+
+    if not email or not password or not pin:
+        return jsonify({"error": "email, password, and pin are required"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, pin_hash, has_password, has_pin
+        FROM users
+        WHERE email = %s;
+        """,
+        (email,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "No user found with that email"}), 404
+
+    if not row["has_password"] or not row["password_hash"]:
+        return jsonify({"error": "No password set for this user"}), 403
+
+    if not verify_secret(password, row["password_hash"]):
+        return jsonify({"error": "Incorrect password"}), 401
+
+    if not row["has_pin"] or not row["pin_hash"]:
+        return jsonify({"error": "No PIN set for this user"}), 403
+
+    if not verify_secret(pin, row["pin_hash"]):
+        return jsonify({"error": "Incorrect PIN"}), 401
+
+    # If we get here, everything is good
+    return jsonify({"message": "Login successful", "username": row["username"]}), 200
+
+
 
 
 @app.post("/issues")
