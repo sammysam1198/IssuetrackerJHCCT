@@ -126,10 +126,14 @@ def check_pin_policy(pin: str):
     return True, None
 
 
-
 def load_stores():
     with open(STORES_PATH, "r") as f:
         return json.load(f)
+
+
+# -----------------------------------------
+#             ENDPOINTS
+# -----------------------------------------
 
 
 @app.get("/")
@@ -275,6 +279,188 @@ def auth_login():
     # If we get here, everything is good
     return jsonify({"message": "Login successful"}), 200
 
+
+@app.post("/auth/change-password")
+def auth_change_password():
+    """
+    Change a user's password.
+
+    Expected JSON:
+    {
+      "email": "user@jtax.com",
+      "username": "ExactCaseUsername",
+      "current_password": "OldPass123!",
+      "new_password": "NewPass123!",
+      "pin": "1234"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    email = data.get("email", "").strip().lower()
+    username = data.get("username", "").strip()
+    current_password = data.get("current_password", "")
+    new_password = data.get("new_password", "")
+    pin = data.get("pin", "")
+
+    if not email or not username or not current_password or not new_password or not pin:
+        return jsonify(
+            {"error": "email, username, current_password, new_password, and pin are required"}
+        ), 400
+
+    # Look up user
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, pin_hash, has_password, has_pin
+        FROM users
+        WHERE email = %s;
+        """,
+        (email,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Unable to change password at this time"}), 401
+
+    # Username must match EXACTLY (case-sensitive)
+    if row["username"] != username:
+        return jsonify({"error": "Unable to change password at this time"}), 401
+
+    # Must have password/PIN set
+    if not row["has_password"] or not row["password_hash"]:
+        return jsonify({"error": "Password not set! Contact Admin"}), 403
+    if not row["has_pin"] or not row["pin_hash"]:
+        return jsonify({"error": "PIN not set! Contact Admin"}), 403
+
+    # Verify current password + PIN
+    if not verify_secret(current_password, row["password_hash"]):
+        return jsonify({"error": "Unable to change password at this time"}), 401
+    if not verify_secret(pin, row["pin_hash"]):
+        return jsonify({"error": "Unable to change password at this time"}), 401
+
+    # Check new password policy
+    ok_pw, pw_errors = check_password_policy(new_password, username)
+    if not ok_pw:
+        return jsonify(
+            {"error": "New password does not meet requirements", "details": pw_errors}
+        ), 400
+
+    # Hash and update
+    new_pw_hash = hash_secret(new_password)
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE users
+        SET password_hash = %s,
+            has_password = TRUE,
+            updated_at = NOW()
+        WHERE email = %s;
+        """,
+        (new_pw_hash, email),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Password changed successfully"}), 200
+
+
+
+
+@app.post("/auth/change-pin")
+def auth_change_pin():
+    """
+    Change a user's PIN.
+
+    Expected JSON:
+    {
+      "email": "user@jtax.com",
+      "username": "ExactCaseUsername",
+      "password": "CurrentPassword123!",
+      "current_pin": "1234",
+      "new_pin": "5678"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    email = data.get("email", "").strip().lower()
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    current_pin = data.get("current_pin", "")
+    new_pin = data.get("new_pin", "")
+
+    if not email or not username or not password or not current_pin or not new_pin:
+        return jsonify(
+            {"error": "email, username, password, current_pin, and new_pin are required"}
+        ), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, pin_hash, has_password, has_pin
+        FROM users
+        WHERE email = %s;
+        """,
+        (email,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Unable to change PIN at this time"}), 401
+
+    if row["username"] != username:
+        return jsonify({"error": "Unable to change PIN at this time"}), 401
+
+    if not row["has_password"] or not row["password_hash"]:
+        return jsonify({"error": "Password not set! Contact Admin"}), 403
+    if not row["has_pin"] or not row["pin_hash"]:
+        return jsonify({"error": "PIN not set! Contact Admin"}), 403
+
+    # Verify current password + current PIN
+    if not verify_secret(password, row["password_hash"]):
+        return jsonify({"error": "Unable to change PIN at this time"}), 401
+    if not verify_secret(current_pin, row["pin_hash"]):
+        return jsonify({"error": "Unable to change PIN at this time"}), 401
+
+    # Check new PIN policy
+    ok_pin, pin_error = check_pin_policy(new_pin)
+    if not ok_pin:
+        return jsonify(
+            {"error": "New PIN does not meet requirements", "details": [pin_error]}
+        ), 400
+
+    # Hash and update
+    new_pin_hash = hash_secret(new_pin)
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE users
+        SET pin_hash = %s,
+            has_pin = TRUE,
+            updated_at = NOW()
+        WHERE email = %s;
+        """,
+        (new_pin_hash, email),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "PIN changed successfully"}), 200
 
 
 
