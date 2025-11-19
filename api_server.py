@@ -119,8 +119,9 @@ def check_pin_policy(pin: str):
         return False, "PIN must contain only digits."
     if not (4 <= len(pin) <= 6):
         return False, "PIN must be between 4 and 6 digits."
-    if 0000  in pin:
-        return False, "Pin cannot be all one number"
+    if len(set(pin)) == 1:
+        return False, "PIN cannot be all one digit (e.g., 0000, 1111)."
+
         
     return True, None
 
@@ -173,7 +174,7 @@ def auth_register():
         return jsonify({"error": "Email domain not allowed"}), 403
 
     # Normalize username for policy
-    username_norm = username.lower()
+    username_norm = username
 
     # Check password + PIN rules
     ok_pw, pw_errors = check_password_policy(password, username_norm)
@@ -217,11 +218,12 @@ def auth_register():
 @app.post("/auth/login")
 def auth_login():
     """
-    Verify email + password + PIN.
+    Verify email + username + password + PIN.
 
     Expected JSON:
     {
       "email": "Sammi.Fishbein@jtax.com",
+      "username": "FishbeinS",
       "password": "MyNewPassword123!",
       "pin": "1234"
     }
@@ -231,11 +233,12 @@ def auth_login():
         return jsonify({"error": "JSON body required"}), 400
 
     email = data.get("email", "").strip().lower()
+    username = data.get("username", "")
     password = data.get("password", "")
     pin = data.get("pin", "")
 
-    if not email or not password or not pin:
-        return jsonify({"error": "email, password, and pin are required"}), 400
+    if not email or not username or not password or not pin:
+        return jsonify({"error": "email, username, password, and pin are required"}), 400
 
     conn = get_db_conn()
     cur = conn.cursor()
@@ -254,20 +257,23 @@ def auth_login():
     if not row:
         return jsonify({"error": "No user found with that email"}), 404
 
+    if row["username"] != username:
+        return jsonify({"error": "Unable to log in at this time"}), 401
+
     if not row["has_password"] or not row["password_hash"]:
-        return jsonify({"error": "No password set for this user"}), 403
+        return jsonify({"error": "Password not set! Contact Admin"}), 403
 
     if not verify_secret(password, row["password_hash"]):
-        return jsonify({"error": "Incorrect password"}), 401
+        return jsonify({"error": "Unable to log in at this time"}), 401
 
     if not row["has_pin"] or not row["pin_hash"]:
-        return jsonify({"error": "No PIN set for this user"}), 403
+        return jsonify({"error": "PIN not set! Contact Admin"}), 403
 
     if not verify_secret(pin, row["pin_hash"]):
-        return jsonify({"error": "Incorrect PIN"}), 401
+        return jsonify({"error": "Unable to log in at this time"}), 401
 
     # If we get here, everything is good
-    return jsonify({"message": "Login successful", "username": row["username"]}), 200
+    return jsonify({"message": "Login successful"}), 200
 
 
 
