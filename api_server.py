@@ -1,9 +1,10 @@
 import os
 import json
-from flask import Flask, jsonify, request
-import psycopg2
-from psycopg2.extras import RealDictCursor
 import bcrypt
+import psycopg2
+from flask import Flask, jsonify, request
+from psycopg2.extras import RealDictCursor
+from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
 
@@ -65,6 +66,12 @@ def init_db():
         );
         """
     )
+    cur.execute(
+    """
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+    """
+)
 
     
     conn.commit()
@@ -276,8 +283,105 @@ def auth_login():
     if not verify_secret(pin, row["pin_hash"]):
         return jsonify({"error": "Unable to log in at this time"}), 401
 
+    #update last_login_at
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE users
+        SET last_login_at = NOW(),
+            updated_at = NOW()
+        WHERE email = %s;
+        """,
+        (email,),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
     # If we get here, everything is good
     return jsonify({"message": "Login successful"}), 200
+
+
+
+@app.post("/auth/quick-login")
+def auth_quick_login():
+    """
+    Quick login with username + password ONLY if last_login_at is within 156 hours.
+
+    Expected JSON:
+    {
+      "username": "ExactCaseUsername",
+      "password": "CurrentPassword123!"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+
+    if not username or not password:
+        return jsonify({"error": "username and password are required"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, has_password, last_login_at
+        FROM users
+        WHERE username = %s;
+        """,
+        (username,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    # Generic failure message to not leak info
+    generic_error = {"error": "Unable to log in at this time", "require_full": True}
+
+    if not row:
+        return jsonify(generic_error), 401
+
+    # Username is exact (case sensitive) by query, so no extra check needed
+    if not row["has_password"] or not row["password_hash"]:
+        return jsonify(generic_error), 401
+
+    if not verify_secret(password, row["password_hash"]):
+        return jsonify(generic_error), 401
+
+    last_login_at = row["last_login_at"]
+    if last_login_at is None:
+        # Never logged in before with full protocol
+        return jsonify(generic_error), 401
+
+    # Check if last_login_at is within the last 156 hours
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=156)
+    if last_login_at < cutoff:
+        # Too old, require full login
+        return jsonify(generic_error), 401
+
+    # Quick login OK – refresh last_login_at
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE users
+        SET last_login_at = NOW(),
+            updated_at = NOW()
+        WHERE username = %s;
+        """,
+        (username,),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Quick login successful", "username": row["username"]}), 200
+
 
 
 @app.post("/auth/change-password")
