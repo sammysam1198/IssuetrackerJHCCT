@@ -462,6 +462,207 @@ def auth_change_pin():
 
     return jsonify({"message": "PIN changed successfully"}), 200
 
+ADMIN_EMAIL = "sammi.fishbein@jtax.com".lower()  # your admin email, lowercased
+
+@app.post("/auth/admin/reset-password")
+def auth_admin_reset_password():
+    """
+    Admin-only: reset another user's password.
+
+    Expected JSON:
+    {
+      "admin_username": "YourAdminUsername",
+      "admin_password": "YourAdminPassword123!",
+      "target_username": "TargetUser",
+      "new_password": "NewPass123!"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    admin_username = data.get("admin_username", "").strip()
+    admin_password = data.get("admin_password", "")
+    target_username = data.get("target_username", "").strip()
+    new_password = data.get("new_password", "")
+
+    if not admin_username or not admin_password or not target_username or not new_password:
+        return jsonify({"error": "All fields are required"}), 400
+
+    # 1) Verify admin identity (admin email is fixed)
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, has_password
+        FROM users
+        WHERE email = %s;
+        """,
+        (ADMIN_EMAIL,),
+    )
+    admin_row = cur.fetchone()
+
+    if not admin_row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Admin account not found"}), 403
+
+    if admin_row["username"] != admin_username:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Not authorized"}), 403
+
+    if not admin_row["has_password"] or not admin_row["password_hash"]:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Admin password not set"}), 403
+
+    if not verify_secret(admin_password, admin_row["password_hash"]):
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Not authorized"}), 403
+
+    # 2) Reset target user's password
+    cur.execute(
+        """
+        SELECT email, username
+        FROM users
+        WHERE username = %s;
+        """,
+        (target_username,),
+    )
+    target_row = cur.fetchone()
+    if not target_row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Target user not found"}), 404
+
+    ok_pw, pw_errors = check_password_policy(new_password, target_username)
+    if not ok_pw:
+        cur.close()
+        conn.close()
+        return jsonify(
+            {"error": "New password does not meet requirements", "details": pw_errors}
+        ), 400
+
+    new_pw_hash = hash_secret(new_password)
+
+    cur.execute(
+        """
+        UPDATE users
+        SET password_hash = %s,
+            has_password = TRUE,
+            updated_at = NOW()
+        WHERE username = %s;
+        """,
+        (new_pw_hash, target_username),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "Password reset successfully"}), 200
+
+
+@app.post("/auth/admin/reset-pin")
+def auth_admin_reset_pin():
+    """
+    Admin-only: reset another user's PIN.
+
+    Expected JSON:
+    {
+      "admin_username": "YourAdminUsername",
+      "admin_password": "YourAdminPassword123!",
+      "target_username": "TargetUser",
+      "new_pin": "5678"
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    admin_username = data.get("admin_username", "").strip()
+    admin_password = data.get("admin_password", "")
+    target_username = data.get("target_username", "").strip()
+    new_pin = data.get("new_pin", "")
+
+    if not admin_username or not admin_password or not target_username or not new_pin:
+        return jsonify({"error": "All fields are required"}), 400
+
+    # Verify admin (same as above)
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT email, username, password_hash, has_password
+        FROM users
+        WHERE email = %s;
+        """,
+        (ADMIN_EMAIL,),
+    )
+    admin_row = cur.fetchone()
+
+    if not admin_row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Admin account not found"}), 403
+
+    if admin_row["username"] != admin_username:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Not authorized"}), 403
+
+    if not admin_row["has_password"] or not admin_row["password_hash"]:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Admin password not set"}), 403
+
+    if not verify_secret(admin_password, admin_row["password_hash"]):
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Not authorized"}), 403
+
+    # Reset target user's PIN
+    cur.execute(
+        """
+        SELECT email, username
+        FROM users
+        WHERE username = %s;
+        """,
+        (target_username,),
+    )
+    target_row = cur.fetchone()
+    if not target_row:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Target user not found"}), 404
+
+    ok_pin, pin_error = check_pin_policy(new_pin)
+    if not ok_pin:
+        cur.close()
+        conn.close()
+        return jsonify(
+            {"error": "New PIN does not meet requirements", "details": [pin_error]}
+        ), 400
+
+    new_pin_hash = hash_secret(new_pin)
+
+    cur.execute(
+        """
+        UPDATE users
+        SET pin_hash = %s,
+            has_pin = TRUE,
+            updated_at = NOW()
+        WHERE username = %s;
+        """,
+        (new_pin_hash, target_username),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"message": "PIN reset successfully"}), 200
+
 
 
 @app.post("/issues")
