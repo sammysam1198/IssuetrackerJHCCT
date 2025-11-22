@@ -980,8 +980,11 @@ def update_issue():
         global_issue = str(raw_global_issue).strip().lower() in ("true", "yes", "y", "1")
 
     # --- NORMALIZE global_num ---
-    if raw_global_num not in (None, ""):
-        global_num = int(raw_global_num)
+     if raw_global_num not in (None, ""):
+        try:
+            global_num = int(raw_global_num)
+        except ValueError:
+            return jsonify({"error": "Global Number must be an integer"}), 400
     else:
         global_num = None
 
@@ -990,26 +993,26 @@ def update_issue():
     cur = conn.cursor()
     cur.execute(
         """
-        UPDATE issues
-        SET
-            store_name = COALESCE(%s, store_name),
-            store_number = COALESCE(%s, store_number),
-            issue_name = %s,
-            priority = %s,
-            computer_number = %s,
-            device_type = %s,
-            category = %s,
-            description = %s,
-            narrative = %s,
-            replicable = %s,
-            global_issue = %s,
-            global_num = %s,
-            status = %s,
-            resolution = %s,
-            updated_at = NOW()
-        WHERE id = %s
-        RETURNING *;
-        """,
+    UPDATE issues
+    SET
+       store_name = COALESCE(%s, store_name),
+       store_number = COALESCE(%s, store_number)
+       issue_name = %s,
+       priority = %s,
+       computer_number = %s,
+       device_type = %s,
+       category = %s,
+       description = %s,
+       narrative = %s,
+       replicable = %s,
+       global_issue = COALESCE(%s, global_issue),
+       global_num = COALESCE(%s, global_num),
+       status = %s,
+       resolution = %s,
+       updated_at = NOW()
+    WHERE id = %s
+    RETURNING *;
+      """,
         (
             store_name,
             int(store_number) if store_number is not None else None,
@@ -1090,7 +1093,7 @@ def search_issues():
         query += " AND issue_name ILIKE %s"
         params.append(f"%{name}%")
 
-       if global_issue is not None:
+    if global_issue is not None:
         val = str(global_issue).strip().lower()
         if val in ("true", "1", "yes", "y"):
             query += " AND global_issue = %s"
