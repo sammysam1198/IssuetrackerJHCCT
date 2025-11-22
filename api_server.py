@@ -831,8 +831,12 @@ def add_issue():
         global_issue = str(raw_global_issue).strip().lower() in ("true", "yes", "y", "1")
 
     # --- NORMALIZE global_num TO INT OR NONE ---
+        # --- NORMALIZE global_num TO INT OR NONE ---
     if raw_global_num not in (None, ""):
-        global_num = int(raw_global_num)
+        try:
+            global_num = int(raw_global_num)
+        except ValueError:
+            return jsonify({"error": "Global Number must be an integer"}), 400
     else:
         global_num = None
 
