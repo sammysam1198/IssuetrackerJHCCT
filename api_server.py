@@ -980,11 +980,11 @@ def update_issue():
         global_issue = str(raw_global_issue).strip().lower() in ("true", "yes", "y", "1")
 
     # --- NORMALIZE global_num ---
-     if raw_global_num not in (None, ""):
-        try:
-            global_num = int(raw_global_num)
-        except ValueError:
-            return jsonify({"error": "Global Number must be an integer"}), 400
+    if raw_global_num not in (None, ""):
+    try:
+        global_num = int(raw_global_num)
+    except ValueError:
+        return jsonify({"error": "Global Number must be an integer"}), 400
     else:
         global_num = None
 
