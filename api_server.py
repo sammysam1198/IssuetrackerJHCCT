@@ -50,6 +50,11 @@ def init_db():
     # In case the table already existed without 'category', add it.
     cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;")
 
+    #Added column for globalIssues...how many stores are experiencing this issue
+    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS global_issue BOOLEAN NOT NULL DEFAULT FALSE;")
+    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS global_num INTEGER;")
+    
+
 # ----- NEW: USERS TABLE -----
     cur.execute(
         """
@@ -787,6 +792,8 @@ def add_issue():
         "Description": "...",
         "Narrative": "",
         "Replicable?": "Yes/No",
+        "Global Issue": "False",
+        "Global Number": "12",
         "Status": "Unresolved",
         "Resolution": ""
       }
@@ -812,9 +819,24 @@ def add_issue():
     description = issue.get("Description")
     narrative = issue.get("Narrative", "")
     replicable = issue.get("Replicable?")
+    raw_global_issue = issue.get("Global Issue")
+    raw_global_num = issue.get("Global Number")
     status = issue.get("Status")
     resolution = issue.get("Resolution", "")
 
+    # --- NORMALIZE global_issue TO BOOL ---
+    if isinstance(raw_global_issue, bool):
+        global_issue = raw_global_issue
+    else:
+        global_issue = str(raw_global_issue).strip().lower() in ("true", "yes", "y", "1")
+
+    # --- NORMALIZE global_num TO INT OR NONE ---
+    if raw_global_num not in (None, ""):
+        global_num = int(raw_global_num)
+    else:
+        global_num = None
+
+    
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute(
@@ -822,9 +844,10 @@ def add_issue():
         INSERT INTO issues (
             store_name, store_number, issue_name, priority,
             computer_number, device_type, category,
-            description, narrative, replicable, status, resolution
+            description, narrative, replicable, global_issue, 
+            global_num, status, resolution
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING *;
         """,
         (
@@ -838,6 +861,8 @@ def add_issue():
             description,
             narrative,
             replicable,
+            global_issue,
+            global_num if global_num is not None else None,
             status,
             resolution,
         ),
@@ -913,6 +938,8 @@ def update_issue():
           "Description": "...",
           "Narrative": "...",
           "Replicable?": "...",
+          "Global Issue": "FALSE",
+          "Global Number": "12",
           "Status": "...",
           "Resolution": "..."
       }
@@ -938,8 +965,26 @@ def update_issue():
     description = updated_issue.get("Description")
     narrative = updated_issue.get("Narrative", "")
     replicable = updated_issue.get("Replicable?")
+    raw_global_issue = updated_issue.get("Global Issue")
+    raw_global_num = updated_issue.get("Global Number")
     status = updated_issue.get("Status")
     resolution = updated_issue.get("Resolution", "")
+
+    # --- NORMALIZE global_issue ---
+    if raw_global_issue is None:
+        global_issue = None  # means "don't change it"
+        
+    elif isinstance(raw_global_issue, bool):
+        global_issue = raw_global_issue
+    else:
+        global_issue = str(raw_global_issue).strip().lower() in ("true", "yes", "y", "1")
+
+    # --- NORMALIZE global_num ---
+    if raw_global_num not in (None, ""):
+        global_num = int(raw_global_num)
+    else:
+        global_num = None
+
 
     conn = get_db_conn()
     cur = conn.cursor()
@@ -957,6 +1002,8 @@ def update_issue():
             description = %s,
             narrative = %s,
             replicable = %s,
+            global_issue = %s,
+            global_num = %s,
             status = %s,
             resolution = %s,
             updated_at = NOW()
@@ -974,6 +1021,8 @@ def update_issue():
             description,
             narrative,
             replicable,
+            global_issue,
+            global_num if global_num is not None else None,
             status,
             resolution,
             issue_id,
@@ -1000,6 +1049,7 @@ def search_issues():
       status=Unresolved
       device=Computer
       name=Printer%20Down
+      global_issue=True
 
     All text fields use ILIKE '%value%' (case-insensitive, partial match).
     """
@@ -1008,8 +1058,9 @@ def search_issues():
     status = request.args.get("status")
     device = request.args.get("device")       # also maps to device_type
     name = request.args.get("name")           # maps to issue_name
+    global_issue = request.args.get("global_issue")
 
-    if not any([store_number, category, status, device, name]):
+    if not any([store_number, category, status, device, name, global_issue]):
         return jsonify({"error": "At least one search parameter is required"}), 400
 
     conn = get_db_conn()
@@ -1038,6 +1089,15 @@ def search_issues():
     if name:
         query += " AND issue_name ILIKE %s"
         params.append(f"%{name}%")
+
+       if global_issue is not None:
+        val = str(global_issue).strip().lower()
+        if val in ("true", "1", "yes", "y"):
+            query += " AND global_issue = %s"
+            params.append(True)
+        elif val in ("false", "0", "no", "n"):
+            query += " AND global_issue = %s"
+            params.append(False)
 
     cur.execute(query, params)
     rows = cur.fetchall()
