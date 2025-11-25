@@ -188,8 +188,63 @@ def check_pin_policy(pin: str):
 
 
 def load_stores():
-    with open(STORES_PATH, "r") as f:
-        return json.load(f)
+    """
+    Load store metadata from the Postgres `stores` table and return it in the
+    legacy Stores.json structure, keyed by store name.
+    """
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            store_number,
+            store_name,
+            type,
+            state,
+            num_comp,
+            address,
+            city,
+            zip,
+            phone,
+            kiosk
+        FROM stores
+        ORDER BY store_number;
+        """
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    stores_legacy = {}
+    for row in rows:
+        legacy = db_store_row_to_legacy(row)
+        # Legacy structure used store name as the key
+        stores_legacy[legacy["Store Name"]] = legacy
+
+    return stores_legacy
+
+
+
+def db_store_row_to_legacy(row):
+    """
+    Adapt a row from the `stores` DB table into the legacy Stores.json structure.
+    This keeps older client code working without caring that the backend changed.
+    """
+    return {
+        "Store Number": row["store_number"],
+        "Store Name": row["store_name"],
+        "State": row.get("state"),
+        "Type": row.get("type"),
+        "Computers": row.get("num_comp"),
+        "Address": row.get("address"),
+        "City": row.get("city"),
+        "ZIP": row.get("zip"),
+        "Phone": row.get("phone"),
+        "Kiosk Type": row.get("kiosk"),
+        # Legacy structure kept issues inside each store; issues now live in a
+        # separate table, so this is left as an empty list for compatibility.
+        "Known Issues": row.get("Known Issues", []),
+    }
 
 
 # -----------------------------------------
@@ -204,9 +259,58 @@ def home():
 
 @app.get("/stores")
 def get_stores():
-    """Return store metadata from Stores.json (no issues here)."""
-    stores = load_stores()
-    return jsonify(stores)
+    """
+    Return store metadata in the *legacy* Stores.json structure,
+    but backed by the Postgres `stores` table.
+
+    Shape:
+    {
+      "Some Store Name": {
+        "Store Number": 123,
+        "Store Name": "Some Store Name",
+        "State": "MA",
+        "Type": "Brick & Mortar",
+        "Computers": 5,
+        "Address": "...",
+        "City": "...",
+        "ZIP": "...",
+        "Phone": "...",
+        "Kiosk Type": "...",
+        "Known Issues": []
+      },
+      ...
+    }
+    """
+    conn = get_db_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            store_number,
+            store_name,
+            type,
+            state,
+            num_comp,
+            address,
+            city,
+            zip,
+            phone,
+            kiosk
+        FROM stores
+        ORDER BY store_number;
+        """
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    stores_legacy = {}
+    for row in rows:
+        legacy = db_store_row_to_legacy(row)
+        # Legacy structure keyed by store name, just like Stores.json was
+        stores_legacy[legacy["Store Name"]] = legacy
+
+    return jsonify(stores_legacy)
 
 @app.post("/auth/register")
 def auth_register():
