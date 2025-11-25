@@ -8,13 +8,24 @@ from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
 
+TRUSTED_ADMINS = {
+    "Sammi.fishbein@jtax.com",
+    "John.Maron@jtax.com",
+}
+
+
 # --- File paths for stores.json (store metadata only) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STORES_PATH = os.path.join(BASE_DIR, "Stores.json")
 
 # --- Database connection ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
+def is_trusted_admin_email(email: str | None) -> bool:
+    if not email:
+        return False
+    email = email.strip().lower()
+    return email in {e.lower() for e in TRUSTED_ADMINS}
+    
 
 def get_db_conn():
     if not DATABASE_URL:
