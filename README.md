@@ -1,7 +1,2 @@
-Here is my app for work. I just finished the API work, so it's now online using Render and a Postgres DB 
-The CCT and CLP folders are releases. 2.2.5, 3.1.0, and 3.1.3 are stable right now. 2.2.5 is a local version, and you'll need Stores.Json to run it. 3.1.0 and 3.1.3 run from the API and don't need a local file. 3.1.3 is a mobile version sorta. i don't know how to do APK or anything yet, or GUI  work, so I just put the .py file in there and changed some of the color schemes so they dont come out weird on mobile. It uses a Python compiler for mobile and will run with the API inside of it. I personally recommend Pydroid for Android or Pyto IDE for iPhone. This program has no real use for anyone outside of my company, but its essentially a database for compiling and documenting issues. if you are goinitg to use it to see how it works make sure you check Stores.Json because the store numbers are used in pretty much every step, and the program will reject your query if you enter a store number it doesnt recognize. to save you some time I'll give you a few here, but if you want more just look at the JSON. 19227, 19340, 14145, 55095. 
-Feel free to take, use, copy, or redistribute commercially, no credit needed unless you want to. If you do use something from this project, it would be cool if you would message me on Instagram and let me know what you're using it for, just so I know, cuz it's cool to know things. Chroma_Glow_Synths on Instagram. 
-
-thanks
-
+Here is my app for work. 5.0 is the newest version and has GUI. but its password protected so if you want a login and youre from JH let me know and give me your JH email and ill let you chck it out
 Sammi
