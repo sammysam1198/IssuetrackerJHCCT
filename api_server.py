@@ -23,9 +23,13 @@ def get_db_conn():
 
 
 def init_db():
-    """Create issues table if it doesn't exist and ensure new columns exist."""
+    """Create/upgrade tables (issues, users, stores) and ensure new columns exist."""
     conn = get_db_conn()
     cur = conn.cursor()
+
+    # =========================
+    # ISSUES TABLE
+    # =========================
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS issues (
@@ -43,19 +47,27 @@ def init_db():
             status TEXT,
             resolution TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            global_issue BOOLEAN NOT NULL DEFAULT FALSE,
+            global_num INTEGER
         );
         """
     )
-    # In case the table already existed without 'category', add it.
+
+    # Backwards-compat for older DBs that might not have these columns yet
     cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;")
+    cur.execute(
+        "ALTER TABLE issues "
+        "ADD COLUMN IF NOT EXISTS global_issue BOOLEAN NOT NULL DEFAULT FALSE;"
+    )
+    cur.execute(
+        "ALTER TABLE issues "
+        "ADD COLUMN IF NOT EXISTS global_num INTEGER;"
+    )
 
-    #Added column for globalIssues...how many stores are experiencing this issue
-    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS global_issue BOOLEAN NOT NULL DEFAULT FALSE;")
-    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS global_num INTEGER;")
-    
-
-# ----- NEW: USERS TABLE -----
+    # =========================
+    # USERS TABLE
+    # =========================
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -71,17 +83,54 @@ def init_db():
         );
         """
     )
-    cur.execute(
-    """
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
-    """
-)
 
-    
+    cur.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+        """
+    )
+
+    # =========================
+    # STORES TABLE
+    # =========================
+    # Base definition (in case table doesn't exist yet)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stores (
+            id SERIAL PRIMARY KEY,
+            store_number INTEGER UNIQUE NOT NULL,
+            store_name TEXT NOT NULL,
+            type TEXT,
+            state TEXT,
+            num_comp INTEGER,
+            address TEXT,
+            city TEXT,
+            zip TEXT,
+            phone TEXT,
+            kiosk TEXT
+        );
+        """
+    )
+
+    # Backwards-compat: ensure new metadata columns exist even on older DBs
+    cur.execute(
+        """
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS address TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS city TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS zip TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS phone TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS kiosk TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS num_comp INTEGER;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS type TEXT;
+        ALTER TABLE stores ADD COLUMN IF NOT EXISTS state TEXT;
+        """
+    )
+
     conn.commit()
     cur.close()
     conn.close()
+
 # ------------------------
 # PASSWORD HASHING
 # ------------------------
