@@ -442,12 +442,13 @@ def auth_login():
         return jsonify({"error": "JSON body required"}), 400
 
     email = data.get("email", "").strip().lower()
-    username = data.get("username", "")
+    username = data.get("username", "").strip()   # <-- FIX
     password = data.get("password", "")
-    pin = data.get("pin", "")
+    pin = data.get("pin", "").strip()             # <-- FIX
 
     if not email or not username or not password or not pin:
         return jsonify({"error": "email, username, password, and pin are required"}), 400
+
 
     conn = get_db_conn()
     cur = conn.cursor()
