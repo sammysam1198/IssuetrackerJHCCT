@@ -98,7 +98,7 @@ def init_db():
 
     cur.execute(
     """
-        INSERT INTO stores (store_number, store_name, address, city, state, zip, phone, store_type, desks, kiosk)
+        INSERT INTO stores (store_number, store_name, address, city, state, zip, phone, type, num_comp, kiosk)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (store_number) DO UPDATE SET
               store_name = EXCLUDED.store_name,
@@ -107,8 +107,8 @@ def init_db():
               state = EXCLUDED.state,
               zip = EXCLUDED.zip,
               phone = EXCLUDED.phone,
-              store_type = EXCLUDED.store_type,
-              desks = EXCLUDED.desks,
+              type = EXCLUDED.type,
+              num_comp = EXCLUDED.num_comp,
               kiosk = EXCLUDED.kiosk;
     """,
     (19389, "West Hartford", "1142A New Britain Ave", "West Hartford", "CT", "06110", "(860) 453-2011", "Store Front", 4, "N/A"),
