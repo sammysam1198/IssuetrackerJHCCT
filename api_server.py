@@ -13,6 +13,7 @@ app = Flask(__name__)
 TRUSTED_ADMINS = {
     "Sammi.fishbein@jtax.com",
     "John.Maron@jtax.com",
+    "Dominique.Smith@jtax.com"
 }
 
 
@@ -94,28 +95,7 @@ def init_db():
         """
     )
 
-    #One time script for W Hartford
-
-    cur.execute(
-    """
-        INSERT INTO stores (store_number, store_name, address, city, state, zip, phone, type, num_comp, kiosk)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (store_number) DO UPDATE SET
-              store_name = EXCLUDED.store_name,
-              address = EXCLUDED.address,
-              city = EXCLUDED.city,
-              state = EXCLUDED.state,
-              zip = EXCLUDED.zip,
-              phone = EXCLUDED.phone,
-              type = EXCLUDED.type,
-              num_comp = EXCLUDED.num_comp,
-              kiosk = EXCLUDED.kiosk;
-    """,
-    (19389, "West Hartford", "1142A New Britain Ave", "West Hartford", "CT", "06110", "(860) 453-2011", "Store Front", 4, "N/A"),
-)
-
     
-
     # =========================
     # USERS TABLE
     # =========================
@@ -135,7 +115,6 @@ def init_db():
         );
         """
     )
-
 
     # =======================
     # Tech Table
@@ -160,7 +139,6 @@ def init_db():
         """
     )
     
-
     
     # =========================
     # STORES TABLE
@@ -181,20 +159,6 @@ def init_db():
             phone TEXT,
             kiosk TEXT
         );
-        """
-    )
-
-    # Backwards-compat: ensure new metadata columns exist even on older DBs
-    cur.execute(
-        """
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS address TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS city TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS zip TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS phone TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS kiosk TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS num_comp INTEGER;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS type TEXT;
-        ALTER TABLE stores ADD COLUMN IF NOT EXISTS state TEXT;
         """
     )
 
