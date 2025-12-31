@@ -94,17 +94,6 @@ def init_db():
         """
     )
 
-    # Backwards-compat for older DBs that might not have these columns yet
-    cur.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS category TEXT;")
-    cur.execute(
-        "ALTER TABLE issues "
-        "ADD COLUMN IF NOT EXISTS global_issue BOOLEAN NOT NULL DEFAULT FALSE;"
-    )
-    cur.execute(
-        "ALTER TABLE issues "
-        "ADD COLUMN IF NOT EXISTS global_num INTEGER;"
-    )
-
     # =========================
     # USERS TABLE
     # =========================
@@ -119,15 +108,9 @@ def init_db():
             has_password BOOLEAN NOT NULL DEFAULT FALSE,
             has_pin BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            last_login_at TIMESTAMPTZ
         );
-        """
-    )
-
-    cur.execute(
-        """
-        ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
         """
     )
 
