@@ -114,6 +114,32 @@ def init_db():
         """
     )
 
+
+    # =======================
+    # Tech Table
+    # =======================
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS store_devices (
+            id SERIAL PRIMARY KEY,
+            device_uid TEXT UNIQUE NOT NULL,
+            store_number INTEGER NOT NULL REFERENCES stores(store_number),
+            device_type TEXT NOT NULL,
+            device_number TEXT,
+            manufacturer TEXT,
+            model TEXT,
+            device_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_store_devices_store_number
+            ON store_devices(store_number);
+        """
+    )
+    
+
+    
     # =========================
     # STORES TABLE
     # =========================
