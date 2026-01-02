@@ -1257,7 +1257,6 @@ def get_all_issues():
     return jsonify(rows), 200
 
 
-
 @app.get("/issues/by-store")
 def get_issues_by_store():
     """
@@ -1301,6 +1300,58 @@ def get_issues_by_store():
     conn.close()
 
     return jsonify(rows), 200
+
+
+@app.get("/devices/by-store")
+def get_devices_by_store():
+    """
+    Query params:
+      ?store_number=12345
+
+    Returns:
+      {
+        "store_number": 12345,
+        "devices": [
+          {device row...},
+          ...
+        ]
+      }
+    """
+    store_number = request.args.get("store_number")
+    if not store_number:
+        return jsonify({"error": "store_number is required"}), 400
+
+    try:
+        store_number_int = int(store_number)
+    except ValueError:
+        return jsonify({"error": "store_number must be an integer"}), 400
+
+    conn = get_db_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT
+            device_uid,
+            store_number,
+            device_type,
+            device_number,
+            manufacturer,
+            model,
+            device_notes
+        FROM store_devices
+        WHERE store_number = %s
+        ORDER BY device_type, device_number NULLS LAST, manufacturer, model;
+        """,
+        (store_number_int,),
+    )
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return jsonify({"store_number": store_number_int, "devices": rows}), 200
+
 
 
 @app.post("/issues/update")
