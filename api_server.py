@@ -580,7 +580,13 @@ def auth_quick_login():
     cur.close()
     conn.close()
 
-    return jsonify({"message": "Quick login successful", "username": row["username"], "email": row["email"]}), 200
+    is_admin = is_trusted_admin_email(row["email"])
+
+    return jsonify({
+        "message": "Quick login successful.",
+        "email": row["email"],
+        "is_admin": is_admin
+    }), 200
 
 
 
