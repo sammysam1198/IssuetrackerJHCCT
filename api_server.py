@@ -162,6 +162,30 @@ def init_db():
         """
     )
 
+    # ======================
+    # One Time Updates
+    # ======================
+    cur.execute(
+    """
+    INSERT INTO stores
+        (store_number, store_name, type, state, num_comp, address, city, zip, phone, kiosk)
+    VALUES
+        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (store_number) DO UPDATE SET
+        store_name = EXCLUDED.store_name,
+        type       = EXCLUDED.type,
+        state      = EXCLUDED.state,
+        num_comp   = EXCLUDED.num_comp,
+        address    = EXCLUDED.address,
+        city       = EXCLUDED.city,
+        zip        = EXCLUDED.zip,
+        phone      = EXCLUDED.phone,
+        kiosk      = EXCLUDED.kiosk;
+    """,
+    (71669, "Mobile Unit", "Mobile", "N/A", 1, "N/A", "N/A", "N/A", "N/A", "Mobile"),
+)
+
+
     conn.commit()
     cur.close()
     conn.close()
